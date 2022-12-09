@@ -1,0 +1,13 @@
+*.o
+*.ii
+*.s
+nkt
+.log/
+*.txt
+*.db
+.temp/
+resources/
+*.bin
+*.asm
+*.properties
+*.kt
