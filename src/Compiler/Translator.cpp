@@ -16,6 +16,13 @@
 #define   INT(VALUE) (int)(VALUE)
 #define FRACT(VALUE) (int)((VALUE - INT(VALUE))*10000)
 
+#define CLEAR_RESOURCES()                       \
+  do                                            \
+    {                                           \
+      db::removeVarTable(translator);           \
+      ERROR(false);                             \
+    } while (0)
+
 #define CHECK_ARGUMENTS()                                               \
   if (!translator || !token || !target) ERROR(false)
 
@@ -97,7 +104,7 @@
 
 const int BUFFER_SIZE  = 16;
 
-const int  VIDEO_MEMORY_START =  0;
+const int  VIDEO_MEMORY_START =   0;
 const int GLOBAL_MEMORY_START = 128;
 const int  STACK_MEMORY_START = 256;
 
@@ -105,7 +112,7 @@ const char *const     RETURN_INT_ADDRESS = "rax";
 const char *const   RETURN_FRACT_ADDRESS = "rbx";
 const char *const  STACK_POINTER_ADDRESS = "rcx";
 const char *const   STACK_BOTTOM_ADDRESS = "rdx";
-const char *const STACK_FUNCTION_ADDRESS = "rfx";
+//const char *const STACK_FUNCTION_ADDRESS = "rfx";
 
 static int allocateVariable(db::Token block, db::Translator *translator, int startIndex, FILE *target);
 static int allocateParameters(db::Token block, db::Translator *translator, FILE *target);
@@ -181,9 +188,9 @@ static bool translateName(
             GLOBAL_MEMORY_START+(var->number*2  ));
   else
     fprintf(target, "PUSH [%d+%s]\nPUSH [%d+%s]\n",
-            STACK_MEMORY_START+(var->number*2+2),
+            STACK_MEMORY_START+(var->number+1),
             STACK_BOTTOM_ADDRESS,
-            STACK_MEMORY_START+(var->number*2+1),
+            STACK_MEMORY_START+(var->number  ),
             STACK_BOTTOM_ADDRESS);
 
   return true;
@@ -248,25 +255,71 @@ static bool translateCall(
 
   START_TRANSLATE(Call);
 
-  fprintf(target, ";Save stack pointer\nPUSH %s\n",
+  fprintf(target, ";Save stack pointer\n"
+          "PUSH %s\n",
+          //          "POP [%d+%s]\n"
+          //          STACK_POINTER_ADDRESS,
           STACK_BOTTOM_ADDRESS);
+  //          STACK_MEMORY_START+1,
+  //          STACK_POINTER_ADDRESS);
 
   /*
-    printSpaces(tabs, target);
-    fprintf(target,
-    ";Turn on real-calc\n"
-    "PUSH 1\n"
-    "POP rex\n");
-  */
+  fprintf(target,
+          ";Turn off real-calc\n"
+          "PUSH 0\n"
+          "POP rex\n");
 
+  fprintf(target,
+          ";Update stack pointer\n"
+          "PUSH 1\n"
+          "PUSH %s\n"
+          "ADD\n"
+          "POP %s\n",
+          STACK_POINTER_ADDRESS,
+          STACK_POINTER_ADDRESS);
+
+  fprintf(target,
+          ";Turn on real-calc\n"
+          "PUSH 1\n"
+          "POP rex\n");
+  */
   if (token->left->left)
     if (!translateArgument(token->left->left, translator, target))
       ERROR(false);
 
   fprintf(target, "CALL FUN_%s\n", NAME(token->left));
+  /*
+  fprintf(target,
+          ";Turn off real-calc\n"
+          "PUSH 0\n"
+          "POP rex\n");
 
+  fprintf(target,
+          ";Update stack pointer\n"
+          "PUSH 1\n"
+          "PUSH %s\n"
+          "SUB\n"
+          "POP %s\n",
+          STACK_POINTER_ADDRESS,
+          STACK_POINTER_ADDRESS);
+
+  fprintf(target,
+          ";Turn on real-calc\n"
+          "PUSH 1\n"
+          "POP rex\n");
+  */
   fprintf(target, ";Pop stack pointer\n");
-  fprintf(target, "POP %s\n\n", STACK_BOTTOM_ADDRESS);
+  fprintf(target,
+          //      "PUSH [%d+%s]\n"
+          "POP %s\n",
+          //          "PUSH [%d+%s]\n"
+          //          "POP %s\n",
+          //STACK_MEMORY_START,
+          //STACK_POINTER_ADDRESS,
+          //STACK_FUNCTION_ADDRESS,
+          //STACK_MEMORY_START+1,
+          STACK_BOTTOM_ADDRESS);
+          //STACK_POINTER_ADDRESS);
 
   fprintf(target, "PUSH %s\n", RETURN_FRACT_ADDRESS);
   fprintf(target, "PUSH %s\n",   RETURN_INT_ADDRESS);
@@ -341,23 +394,39 @@ static bool translateIf(
   fprintf(target, "PUSH 0\n");
   fprintf(target, "JE :ELSE_%6.6d\n\n", currentIfNumber);
 
+  db::addVarTable(translator);
+
   if (IS_ELSE(token->right))
     {
       if (!translateToken(token->right->left, translator,target, error))
-        ERROR(false);
+        CLEAR_RESOURCES();
     }
   else
     {
       if (!translateToken(token->right, translator,target, error))
-        ERROR(false);
+        CLEAR_RESOURCES();
     }
+
+  size_t deltaOffset = 2*stack_top(&translator->varTables)->size;
+  translator->status.stackOffset -= (int)deltaOffset;
+
+  db::removeVarTable(translator);
 
   fprintf(target, "JMP END_IF_%6.6d\n", currentIfNumber);
   fprintf(target, "ELSE_%6.6d:\n", currentIfNumber);
 
   if (IS_ELSE(token->right))
-    if (!translateToken(token->right->right, translator,target, error))
-      ERROR(false);
+    {
+      db::addVarTable(translator);
+
+      if (!translateToken(token->right->right, translator,target, error))
+        CLEAR_RESOURCES();
+
+      deltaOffset = 2*stack_top(&translator->varTables)->size;
+      translator->status.stackOffset -= (int)deltaOffset;
+
+      db::removeVarTable(translator);
+    }
 
   fprintf(target, "END_IF_%6.6d:\n", currentIfNumber);
 
@@ -436,10 +505,10 @@ static bool translateIn(
       else
         {
           fprintf(target, "POP [%d+%s]\n",
-                  STACK_MEMORY_START+(var->number*2+1),/////////////
+                  STACK_MEMORY_START+(var->number  ),
                   STACK_BOTTOM_ADDRESS);
           fprintf(target, "POP [%d+%s]\n",
-                  STACK_MEMORY_START+(var->number*2+2),////////////
+                  STACK_MEMORY_START+(var->number+1),
                   STACK_BOTTOM_ADDRESS);
         }
     }
@@ -507,8 +576,15 @@ static bool translateWhile(
   fprintf(target, "PUSH 0\n");
   fprintf(target, "JE :END_WHILE_%6.6d\n\n", whileCount);
 
+  db::addVarTable(translator);
+
   if (!translateToken(token->right, translator, target, error))
-    ERROR(false);
+    CLEAR_RESOURCES();
+
+  size_t deltaOffset = 2*stack_top(&translator->varTables)->size;
+  translator->status.stackOffset -= (int)deltaOffset;
+
+  db::removeVarTable(translator);
 
   fprintf(target, "JMP WHILE_%6.6d\n", whileCount);
   fprintf(target, "END_WHILE_%6.6d:\n", whileCount++);
@@ -532,18 +608,21 @@ static bool translateVariable(
 
   START_TRANSLATE(Local Var/Val);
 
-  db::Variable *var = searchVariable(NAME(token->left), translator, false);
+  int number = translator->status.stackOffset;
 
-  if (!var) HANDLE_ERROR("Unknown variable: %s", NAME(token->left));
+  translator->status.stackOffset += 2;
+
+  if (!db::addVariable(NAME(token->left), false, translator, number, error))
+    HANDLE_ERROR("Redeclareted of variable: %s", NAME(token->left));
 
   if (!translateToken(token->right, translator, target, error))
     ERROR(false);
 
   fprintf(target, "POP [%d+%s]\n",
-          STACK_MEMORY_START+(var->number*2+1),//////////////
+          STACK_MEMORY_START+(number  ),
           STACK_BOTTOM_ADDRESS);
   fprintf(target, "POP [%d+%s]\n",
-          STACK_MEMORY_START+(var->number*2+2),///////////////
+          STACK_MEMORY_START+(number+1),
           STACK_BOTTOM_ADDRESS);
 
   END_TRANSLATE();
@@ -577,10 +656,10 @@ static bool translateAssignment(
   else
     {
       fprintf(target, "POP [%d+%s]\n",
-              STACK_MEMORY_START+(var->number*2+1),
+              STACK_MEMORY_START+(var->number  ),
               STACK_BOTTOM_ADDRESS);
       fprintf(target, "POP [%d+%s]\n",
-              STACK_MEMORY_START+(var->number*2+2),
+              STACK_MEMORY_START+(var->number+1),
               STACK_BOTTOM_ADDRESS);
     }
   END_TRANSLATE();
@@ -603,12 +682,9 @@ bool db::translate(db::Translator *translator, FILE *target, int *error)
           "POP %s\n"
           "PUSH 0\n"
           "POP %s\n"
-          "PUSH 0\n"
-          "POP %s\n"
           ";End\n\n",
           STACK_POINTER_ADDRESS,
-          STACK_BOTTOM_ADDRESS,
-          STACK_FUNCTION_ADDRESS);
+          STACK_BOTTOM_ADDRESS);
 
   int errorCode = 0;
 
@@ -784,7 +860,7 @@ static void translateFunctions(db::Translator *translator, FILE *target, int *er
         allocateVariable  (function->token->right     , translator, offset, target);
       fprintf(target,
               ";Save stack pointer\n"
-              "PUSH %s\n" "POP %s\n" "PUSH %s\n" "POP %s\n"
+              "PUSH %s\n" "POP %s\n"
 
               ";Turn off real-calc\n"
               "PUSH 0\n" "POP rex\n"
@@ -795,7 +871,6 @@ static void translateFunctions(db::Translator *translator, FILE *target, int *er
               ";Turn on real-calc\n"
               "PUSH 1\n" "POP rex\n",
               STACK_POINTER_ADDRESS, STACK_BOTTOM_ADDRESS,
-              STACK_POINTER_ADDRESS, STACK_FUNCTION_ADDRESS,
               offset, STACK_POINTER_ADDRESS, STACK_POINTER_ADDRESS);
 
       int errorCode = 0;
@@ -803,6 +878,9 @@ static void translateFunctions(db::Translator *translator, FILE *target, int *er
       db::removeVarTable(translator);
 
       if (errorCode) ERROR();
+
+      size_t deltaOffset = 2*stack_top(&translator->varTables)->size;
+      translator->status.stackOffset -= (int)deltaOffset + 1;
 
       fprintf(target,
               ";Update stack pointer\n"
@@ -823,7 +901,7 @@ static bool translateArgument(db::Token block, db::Translator *translator, FILE 
       return false;
 
   if (block->left )
-    if (!translateToken(block->left , translator, target))
+    if (!translateToken(block->left, translator, target))
       return false;
 
   return true;
@@ -831,7 +909,7 @@ static bool translateArgument(db::Token block, db::Translator *translator, FILE 
 
 static int allocateParameters(db::Token block, db::Translator *translator, FILE *target)
 {
-  int parameterIndex = 0;
+  int offset = 1;
 
   for (db::Token temp = block; temp; temp = temp->right)
     {
@@ -839,23 +917,23 @@ static int allocateParameters(db::Token block, db::Translator *translator, FILE 
                       NAME(temp->left->left),
                       false,
                       translator,
-                      parameterIndex
+                      offset
                      );
 
       fprintf(target,
               ";Get %d parameter\n"
               "POP [%d+%s]\n"
               "POP [%d+%s]\n",
-              parameterIndex,
-              1+STACK_MEMORY_START+parameterIndex*2,
+              offset/2-1,
+              STACK_MEMORY_START+offset,
               STACK_POINTER_ADDRESS,
-              1+STACK_MEMORY_START+parameterIndex*2+1,
+              STACK_MEMORY_START+offset+1,
               STACK_POINTER_ADDRESS);
 
-      ++parameterIndex;
+      offset += 2;
     }
 
-  return parameterIndex*2;
+  return offset;
 }
 
 static int allocateVariable(db::Token block, db::Translator *translator, int startIndex, FILE *target)
@@ -888,7 +966,6 @@ static int allocateBlock(db::Token block, db::Translator *translator, int startI
 static int allocateInstruction(db::Token token, db::Translator *translator, int startIndex, int blockNumber, FILE *target)
 {
   static int variableCount = 0;
-  char buffer[BUFFER_SIZE] = "";
 
   if (!token) { variableCount = 0; return -1; }
 
@@ -912,14 +989,12 @@ static int allocateInstruction(db::Token token, db::Translator *translator, int 
         break;
       case db::STATEMENT_VAL: case db::STATEMENT_VAR:
         {
-          sprintf(buffer, "%d_", blockNumber);
-
-          db::addVariable(
+          /*                   db::addVariable(
                           NAME(token->left),
                           IS_VAL(token),
                           translator,
                           variableCount+startIndex/2
-                         );
+                          );//*///////////////////////////////////////////////////////
 
           fprintf(target,
                   ";Allocate local var/val\n"
