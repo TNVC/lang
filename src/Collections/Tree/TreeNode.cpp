@@ -24,7 +24,7 @@ db::TreeNode *db::createNode(treeValue_t value, type_t type, int *error)
 
   node->type = type;
 
-  if (type == db::type_t::NAME || type == db::type_t::STRING)
+  /*  if (type == db::type_t::NAME || type == db::type_t::STRING)
     {
       char *buffer = (char *)calloc(MAX_NAME_SIZE, sizeof(char));
       if (!buffer)
@@ -37,8 +37,8 @@ db::TreeNode *db::createNode(treeValue_t value, type_t type, int *error)
 
       strncpy(buffer, value.name, MAX_NAME_SIZE);
     }
-  else
-    node->value = value;
+    else*/
+  node->value = value;
 
   return node;
 }
@@ -83,8 +83,8 @@ db::TreeNode *db::createNode(const db::TreeNode *original, int *error)
   db::TreeNode *node =
     createNode(
                original->value,
-               original->type,
-               original->left ? db::createNode(original->left) : nullptr,
+               original->type ,
+               original->left  ? db::createNode(original->left) : nullptr,
                original->right ? db::createNode(original->right) : nullptr,
                &errorCode
                );
@@ -133,11 +133,12 @@ void db::removeNode(db::TreeNode *node, int *error)
   if (node->right)
     removeNode(node->right);
 
+  /*
   if (node->type == db::type_t::NAME)
       free(node->value.name);
 
   if (node->type == db::type_t::STRING)
     free(node->value.string);
-
+  */
   free(node);
 }

@@ -1,6 +1,9 @@
 #pragma once
 
 #define NUM(VALUE) createNumber   (VALUE)
+
+#define NAM(VALUE) createName     (VALUE)
+
 #define VAR(VALUE) createName     (VALUE)
 #define STR(VALUE) createString   (VALUE)
 #define  ST(VALUE) createStatement(VALUE)
@@ -64,6 +67,17 @@
 #define IS_AND(NODE)         IS_IT_STATEMENT(NODE, AND        )
 #define IS_OR(NODE)          IS_IT_STATEMENT(NODE, OR         )
 #define IS_ENDL(NODE)        IS_IT_STATEMENT(NODE, NEW_LINE   )
+#define IS_OUTPUT(NODE)      IS_IT_STATEMENT(NODE, OUTPUT     )
+#define IS_INPUT(NODE)       IS_IT_STATEMENT(NODE, INPUT      )
+#define IS_EQUAL(NODE)       IS_IT_STATEMENT(NODE, EQUAL      )
+#define IS_NOT_EQUAL(NODE)   IS_IT_STATEMENT(NODE, NOT_EQUAL  )
+#define IS_LESS_EQ(NODE)     IS_IT_STATEMENT(NODE, LESS_OR_EQUAL   )
+#define IS_GREATER_EQ(NODE)  IS_IT_STATEMENT(NODE, GREATER_OR_EQUAL)
+#define IS_STATIC(NODE)      IS_IT_STATEMENT(NODE, STATIC     )
+#define IS_START_SQUARE_BRACE(NODE) IS_IT_STATEMENT(NODE, START_SQUARE_BRACE)
+#define IS_END_SQUARE_BRACE(NODE) IS_IT_STATEMENT(NODE, END_SQUARE_BRACE)
+#define IS_INT(NODE)         IS_IT_STATEMENT(NODE, INT        )
+#define IS_PARAM(NODE)       IS_IT_STATEMENT(NODE, PARAMETER  )
 
 #define IS_NUM(NODE)       (NODE->type == db::type_t::NUMBER   )
 #define IS_STATEMENT(NODE) (NODE->type == db::type_t::STATEMENT)
@@ -78,7 +92,7 @@
    IS_SQRT(NODE))
 
 #define IS_IT_STATEMENT(NODE, STATEMENT_NAME)                                \
-  (IS_STATEMENT((NODE)) && STATEMENT((NODE)) == db::STATEMENT_ ## STATEMENT_NAME)
+  ((NODE) && IS_STATEMENT((NODE)) && STATEMENT((NODE)) == db::STATEMENT_ ## STATEMENT_NAME)
 
 #define NUMBER(NODE)    (NODE->value.number)
 #define STATEMENT(NODE) (NODE->value.statement)

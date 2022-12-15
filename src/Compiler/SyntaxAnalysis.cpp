@@ -1,129 +1,15 @@
 #include "SyntaxAnalysis.h"
 #include "Translator.h"
 
+#include <string.h>
+#include <stdarg.h>
 #include "ErrorHandler.h"
 #include "Error.h"
 #include "DSL.h"
 
+#include "SyntaxAnalysisStatic.h"
 
-#define REMOVE_ONE(TOKEN)                       \
-  do                                            \
-    {                                           \
-      if (TOKEN)                                \
-        db::removeNode(TOKEN);                  \
-    } while (0)
-
-#define REMOVE_TWO(TOKEN_1, TOKEN_2)            \
-  do                                            \
-    {                                           \
-      REMOVE_ONE(TOKEN_1);                      \
-      REMOVE_ONE(TOKEN_2);                      \
-    } while (0)
-
-#define REMOVE_THREE(TOKEN_1, TOKEN_2, TOKEN_3)          \
-  do                                                     \
-    {                                                    \
-      REMOVE_TWO(TOKEN_1, TOKEN_2);                      \
-      REMOVE_ONE(TOKEN_3);                               \
-    } while (0)
-
-#define HANDLE_ERROR(MESSAGE, FIRST, SECOND, THIRD)               \
-  do                                                              \
-    {                                                             \
-      handleError(MESSAGE " Line: %d at Position: %d!",           \
-                  TOKEN(translator)->position.line,               \
-                  TOKEN(translator)->position.position);          \
-                                                                  \
-      REMOVE_THREE(FIRST, SECOND, THIRD);                         \
-      ERROR(nullptr);                                             \
-    } while (0)
-
-#define TOKEN(TRANSLATOR) (*TRANSLATOR->tokens)
-#define INCREASE_TOKENS(TRANSLATOR) (++TRANSLATOR->tokens)
-#define FAIL(...)                               \
-  do                                            \
-    {                                           \
-      if (fail) *fail = true;                   \
-                                                \
-      return __VA_ARGS__;                       \
-    } while (0)
-
-
-#define CMD(LEFT, RIGHT)                                \
-  db::createNode(                                       \
-                 db::treeValue_t {.statement =          \
-                   db::STATEMENT_COMPOUND},             \
-                 db::type_t::STATEMENT, LEFT, RIGHT)
-
-#define PARAM(LEFT, RIGHT)                          \
-  db::createNode(                                   \
-                 db::treeValue_t {.statement =      \
-                   db::STATEMENT_PARAMETER},        \
-                 db::type_t::STATEMENT, LEFT, RIGHT)
-
-#define VARIABLE(LEFT, RIGHT)                       \
-  db::createNode(                                   \
-                 db::treeValue_t {.statement =      \
-                   db::STATEMENT_VAR},              \
-                 db::type_t::STATEMENT, LEFT, RIGHT)
-
-#define CHECK_OPEN(TRANSLATOR, FIRST_TOKEN)                           \
-  do                                                                  \
-    {                                                                 \
-      if (!IS_OPEN(TOKEN(TRANSLATOR)))                                \
-        {                                                             \
-          handleError("Expected ( before Line: %d at Position: %d!",  \
-                      TOKEN(TRANSLATOR)->position.line,               \
-                      TOKEN(TRANSLATOR)->position.position);          \
-                                                                      \
-          db::removeNode(FIRST_TOKEN);                                \
-          FAIL(nullptr);                                              \
-        }                                                             \
-      db::removeNode(TOKEN(TRANSLATOR));                              \
-      INCREASE_TOKENS(TRANSLATOR);                                    \
-    } while (0)
-
-#define CHECK_CLOSE(TRANSLATOR, FIRST_TOKEN, SECOND_TOKEN)            \
-  do                                                                  \
-    {                                                                 \
-     if (!IS_CLOSE(TOKEN(TRANSLATOR)))                                \
-        {                                                             \
-          handleError("Expected ) before Line: %d at Position: %d!",  \
-                      TOKEN(TRANSLATOR)->position.line,               \
-                      TOKEN(TRANSLATOR)->position.position);          \
-                                                                      \
-          db::removeNode( FIRST_TOKEN);                               \
-          db::removeNode(SECOND_TOKEN);                               \
-          ERROR(nullptr);                                             \
-        }                                                             \
-     db::removeNode(TOKEN(TRANSLATOR));                               \
-     INCREASE_TOKENS(TRANSLATOR);                                     \
-    } while (0)
-
-#define CHECK_ARGS(...)                                           \
-  do                                                              \
-    {                                                             \
-      if (!translator || !translator->tokens || !fail || !error)  \
-        FAIL(__VA_ARGS__);                                        \
-    } while (0)
-
-
-#define CHECK(IS_IT, SEQUENCE, FOR_FREE)                                \
-  do                                                                    \
-    {                                                                   \
-      if (!IS_IT(TOKEN(translator)))                                    \
-        {                                                               \
-          handleError("Expected " SEQUENCE " at Line: %d at Position: %d!", \
-                      TOKEN(translator)->position.line,                 \
-                      TOKEN(translator)->position.position);            \
-                                                                        \
-          db::removeNode(token);                                        \
-          if (FOR_FREE) db::removeNode(FOR_FREE);                       \
-          FAIL(nullptr);                                                \
-        }                                                               \
-      db::removeNode(TOKEN(translator));                                \
-      INCREASE_TOKENS(translator);                                      \
-    } while (0)
+const int MAX_NAME_SIZE = 64;
 
 typedef db::Token FunType(
                           db::Translator *translator,
@@ -144,6 +30,8 @@ static FunType getInstructionVoid         ;
 static FunType getInput                   ;
 static FunType getOutput                  ;
 
+static FunType getStaticBlock             ;
+
 static FunType getDeclaration             ;
 static FunType getFunctionDeclaration     ;
 static FunType getVariableDeclaration     ;
@@ -153,7 +41,6 @@ static FunType getArgumentList            ;
 static FunType getFunctionBody            ;
 
 static FunType getExpression              ;
-
 static FunType getLogicAndExpression      ;
 static FunType getLogicOrExpression       ;
 static FunType getEqualExpression         ;
@@ -168,11 +55,6 @@ static FunType getNumber                  ;
 static FunType getVariable                ;
 static FunType getValue                   ;
 
-static db::Token createStatement(db::statement_t value)
-{
-  return db::createNode({.statement = value}, db::type_t::STATEMENT);
-}
-
 void db::getGrammarly(db::Translator *translator, int *error)
 {
   if (!translator || !translator->tokens) ERROR();
@@ -184,6 +66,8 @@ void db::getGrammarly(db::Translator *translator, int *error)
   db::addVarTable(translator, &errorCode);
   if (errorCode) ERROR();
 
+  translator->status.returnType = db::ReturnType::None;
+
   translator->grammar.root = getGlobal(translator, &fail, &errorCode);
 
   if (!IS_END(TOKEN(translator)) && !fail && !errorCode)
@@ -191,7 +75,7 @@ void db::getGrammarly(db::Translator *translator, int *error)
                   TOKEN(translator)->position.line,
                   TOKEN(translator)->position.position);
 
-  bool hasMain = searchFunction("main", translator);
+  db::Token hasMain = searchFunction("main", translator);
   if (!hasMain)
     handleError("Not found main function!");
 
@@ -210,6 +94,11 @@ void db::getGrammarly(db::Translator *translator, int *error)
 
   db::removeNode(TOKEN(translator));
   translator->tokens = startToken;
+
+  upStatic(translator, &errorCode);
+  if (errorCode) ERROR();
+  updateMain(hasMain, translator, &errorCode);
+  if (errorCode) ERROR();
 }
 
 static db::Token getGlobal(db::Translator *translator, bool *fail, int *error)
@@ -217,11 +106,8 @@ static db::Token getGlobal(db::Translator *translator, bool *fail, int *error)
   CHECK_ARGS(nullptr);
 
   db::Token token = getDeclaration(translator, fail, error);
-  if (*fail || *error)
-    {
-      handleError("Expected at least one instruction");
-      FAIL(nullptr);
-    }
+  if (*fail || *error) HANDLE_ERROR("Expected at least one instruction", false);
+
   token = CMD(token, nullptr);
   db::Token *freePosition = &token->right;
 
@@ -229,7 +115,7 @@ static db::Token getGlobal(db::Translator *translator, bool *fail, int *error)
     {
       db::Token tempToken = getDeclaration(translator, fail, error);
       if (*fail || *error)
-        HANDLE_ERROR("Expected an instruction", token, nullptr, nullptr);
+        HANDLE_ERROR("Expected an declaration", false, token);
 
       *freePosition = CMD(tempToken, nullptr);
       freePosition = &(*freePosition)->right;
@@ -242,57 +128,18 @@ static db::Token getInstruction(db::Translator *translator, bool *fail, int *err
 {
   CHECK_ARGS(nullptr);
 
-  bool hasntInstruction = false;
-  db::Token token = getCompoundInstruction(translator, &hasntInstruction, error);
-  if (*error) ERROR(nullptr);
-  if (hasntInstruction)
-    {
-      hasntInstruction = false;
-      token = getInstructionChoice(translator, &hasntInstruction, error);
-      if (*error) ERROR(nullptr);
-    }
-  if (hasntInstruction)
-    {
-      hasntInstruction = false;
-      token = getInstructionLoop(translator, &hasntInstruction, error);
-      if (*error) ERROR(nullptr);
-    }
-  if (hasntInstruction)
-    {
-      hasntInstruction = false;
-      token = getInstructionVoid(translator, &hasntInstruction, error);
-      if (*error) ERROR(nullptr);
-    }
-  if (hasntInstruction)
-    {
-      hasntInstruction = false;
-      token = getInstructionExpression(translator, &hasntInstruction, error);
-      if (*error) ERROR(nullptr);
-    }
-  if (hasntInstruction)
-    {
-      hasntInstruction = false;
-      token = getInstructionJump(translator, &hasntInstruction, error);
-      if (*error) ERROR(nullptr);
-    }
-  if (hasntInstruction)
-    {
-      hasntInstruction = false;
-      token = getInput(translator, &hasntInstruction, error);
-      if (*error) ERROR(nullptr);
-    }
-  if (hasntInstruction)
-    {
-      hasntInstruction = false;
-      token = getOutput(translator, &hasntInstruction, error);
-      if (*error) ERROR(nullptr);
-    }
-  if (hasntInstruction)
-    {
-      hasntInstruction = false;
-      token = getVariableDeclaration(translator, fail, error);
-      if (*error) ERROR(nullptr);
-    }
+  bool hasntInstruction = true;
+  db::Token token = nullptr;
+  TRY_GET_CHAR(hasntInstruction, token, getCompoundInstruction  );
+  TRY_GET_CHAR(hasntInstruction, token, getInstructionChoice    );
+  TRY_GET_CHAR(hasntInstruction, token, getInstructionLoop      );
+  TRY_GET_CHAR(hasntInstruction, token, getInstructionVoid      );
+  TRY_GET_CHAR(hasntInstruction, token, getInstructionExpression);
+  TRY_GET_CHAR(hasntInstruction, token, getInstructionJump      );
+  TRY_GET_CHAR(hasntInstruction, token, getInput                );
+  TRY_GET_CHAR(hasntInstruction, token, getOutput               );
+  TRY_GET_CHAR(hasntInstruction, token, getVariableDeclaration  );
+  if (hasntInstruction) FAIL(nullptr);
 
   return token;
 }
@@ -305,8 +152,7 @@ static db::Token getCompoundInstruction(db::Translator *translator, bool *fail, 
 
   if (IS_START_BRACE(TOKEN(translator)))
     {
-      db::removeNode(TOKEN(translator));
-      INCREASE_TOKENS(translator);
+      CLEAN_TOKEN(translator);
 
       db::addVarTable(translator, error);
       if (*error) ERROR(nullptr);
@@ -317,12 +163,7 @@ static db::Token getCompoundInstruction(db::Translator *translator, bool *fail, 
       while (!hasntCommand)
         {
           db::Token instruction = getInstruction(translator, &hasntCommand, error);
-          if (*error)
-            {
-              if (token) db::removeNode(token);
-              db::removeVarTable(translator, error);
-              ERROR(nullptr);
-            }
+          if (*error) CLEAN_RESOURCES(true, token);
           if (!instruction) break;
 
           *freePosition = CMD(instruction, nullptr);
@@ -330,28 +171,12 @@ static db::Token getCompoundInstruction(db::Translator *translator, bool *fail, 
         }
 
       if (!token)
-        {
-          handleError("Expected at least one instruction at Line: %d at Position: %d!",
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
-
-          db::removeVarTable(translator, error);
-          ERROR(nullptr);
-        }
+        HANDLE_ERROR("Expected at least one instruction", true);
 
       if (!IS_END_BRACE(TOKEN(translator)))
-        {
-          handleError("Expected an } at Line: %d at Position: %d!",
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
-
-          db::removeVarTable(translator, error);
-          db::removeNode(token);
-          ERROR(nullptr);
-        }
+        HANDLE_ERROR("Expected at }", true, token);
       db::removeVarTable(translator, error);
-      db::removeNode(TOKEN(translator));
-      INCREASE_TOKENS(translator);
+      CLEAN_TOKEN(translator);
     }
   else
     FAIL(nullptr);
@@ -368,7 +193,7 @@ static db::Token getInstructionExpression(db::Translator *translator, bool *fail
   if (*fail )  FAIL(nullptr);
 
   if (!IS_SEM(TOKEN(translator)))
-    HANDLE_ERROR("Expected ;", token, nullptr, nullptr);
+    HANDLE_ERROR("Expected ;", false, token);
   db::removeNode(TOKEN(translator));
   INCREASE_TOKENS(translator);
 
@@ -388,21 +213,12 @@ static db::Token getInstructionLoop(db::Translator *translator, bool *fail, int 
       CHECK_OPEN(translator, whileToken);
 
       db::Token expression = getExpression(translator, fail, error);
-      if (*fail || *error)
-        {
-          db::removeNode(whileToken);
-          ERROR(nullptr);
-        }
+      if (*fail || *error) CLEAN_RESOURCES(false, whileToken);
 
       CHECK_CLOSE(translator, whileToken, expression);
 
       db::Token instruction = getInstruction(translator, fail, error);
-      if (*fail || *error)
-        {
-          db::removeNode(whileToken);
-          db::removeNode(expression);
-          ERROR(nullptr);
-        }
+      if (*fail || *error) CLEAN_RESOURCES(false, whileToken, expression);
 
       db::setChildren(whileToken, expression, instruction);
     }
@@ -427,23 +243,12 @@ static db::Token getInstructionChoice(db::Translator *translator, bool *fail, in
       if (*error) ERROR(nullptr);
 
       db::Token expression = getExpression(translator, fail, error);
-      if (*fail || *error)
-        {
-          db::removeVarTable(translator, error);
-          db::removeNode(ifToken);
-          ERROR(nullptr);
-        }
+      if (*fail || *error) CLEAN_RESOURCES(true, ifToken);
 
       CHECK_CLOSE(translator, ifToken, expression);
 
       db::Token instruction = getInstruction(translator, fail, error);
-      if (*fail || *error)
-        {
-          db::removeVarTable(translator, error);
-          db::removeNode(ifToken);
-          db::removeNode(expression);
-          ERROR(nullptr);
-        }
+      if (*fail || *error) CLEAN_RESOURCES(true, ifToken, expression);
 
       db::setChildren(ifToken, expression, instruction);
       db::removeVarTable(translator, error);
@@ -451,22 +256,13 @@ static db::Token getInstructionChoice(db::Translator *translator, bool *fail, in
       if (IS_ELSE(TOKEN(translator)))
         {
           db::addVarTable(translator, error);
-          if (*error)
-            {
-              db::removeNode(ifToken);
-              ERROR(nullptr);
-            }
+          if (*error) CLEAN_RESOURCES(false, ifToken);
 
           db::Token elseToken = TOKEN(translator);
           INCREASE_TOKENS(translator);
 
           db::Token elseInstruction = getInstruction(translator, fail, error);
-          if (*error || *fail)
-            {
-              db::removeVarTable(translator, error);
-              db::removeNode(ifToken);
-              ERROR(nullptr);
-            }
+          if (*error || *fail) CLEAN_RESOURCES(true, ifToken, elseToken);
 
           db::setChildren(elseToken, ifToken->right, elseInstruction);
           ifToken->right = elseToken;
@@ -487,21 +283,25 @@ static db::Token getInstructionJump(db::Translator *translator, bool *fail, int 
 
   if (IS_RETURN(token))
     {
+      if (translator->status.returnType == db::ReturnType::None)
+        HANDLE_ERROR("Return forbidden", false);
+
       INCREASE_TOKENS(translator);
 
       db::Token expression = getExpression(translator, fail, error);
-      if (*fail || *error)
-        {
-          db::removeNode(token);
-          ERROR(nullptr);
-        }
+      if (*error) CLEAN_RESOURCES(false, token);
+      if (*fail && translator->status.returnType == db::ReturnType::Type)
+        HANDLE_ERROR("Expected return value", false, token);
+      if (!*fail && translator->status.returnType == db::ReturnType::Void)
+        HANDLE_ERROR("Return value forbidden", false, token, expression);
+      *fail = false;
 
       if (!IS_SEM(TOKEN(translator)))
-        HANDLE_ERROR("Expected ;", token, nullptr, nullptr);
+        HANDLE_ERROR("Expected ;", false, token);
       db::removeNode(TOKEN(translator));
       INCREASE_TOKENS(translator);
 
-      token->right = expression;
+      token->left = expression;
     }
   else
     FAIL(nullptr);
@@ -527,14 +327,11 @@ static db::Token getInstructionVoid(db::Translator *translator, bool *fail, int 
                       );
 
   if (!funToken)
-    {
-      handleError("Unknown function found: '%s' at Line: %d at Position: %d!",
-                  NAME(TOKEN(translator)),
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
-      db::removeNode(token);
-      FAIL(nullptr);
-    }
+    HANDLE_ERROR_WITH_NAME(
+                           "Unknown function found: '%s'",
+                           NAME(TOKEN(translator)),
+                           token
+                          );
   if (!IS_VOID(funToken->left->right))
       FAIL(nullptr);
 
@@ -547,47 +344,68 @@ static db::Token getInstructionVoid(db::Translator *translator, bool *fail, int 
 
   bool hasntArguments = false;
   db::Token arguments = getArgumentList(translator, &hasntArguments, error);
-  if (*error)
-    {
-      db::removeNode(callNode);
-      ERROR(nullptr);
-    }
+  if (*error) CLEAN_RESOURCES(false, callNode);
+
+  bool hasFail = false;
+  arguments = callFunction(funToken->left->left, arguments, &hasFail);
   token->left = arguments;
 
-  int paramCount = 0;
-  for (db::Token temp = funToken->left->left; temp; temp = temp->right)
-    ++paramCount;
-
-  int argCount = 0;
-  for (db::Token temp = arguments; temp; temp = temp->right)
-    ++argCount;
-
-  bool correctArguments = (paramCount == argCount);
-
-  if (!correctArguments)
-    {
-      handleError("Incorrect call of function at Line: %d at Position: %d!",
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
-      db::removeNode(callNode);
-      ERROR(nullptr);
-    }
-
+  if (hasFail)
+    HANDLE_ERROR("Incorrect call of function", false, callNode);
   CHECK(IS_CLOSE, ")", callNode);
   CHECK(IS_SEM  , ";", callNode);
 
   return callNode;
 }
 
+static db::Token getStaticBlock(db::Translator *translator, bool *fail, int *error)
+{
+  CHECK_ARGS(nullptr);
+
+  db::Token token = TOKEN(translator);
+
+  if (!IS_STATIC(token)) FAIL(nullptr);
+
+  STATEMENT(token) = db::statement_t::STATEMENT_FUN;
+
+  INCREASE_TOKENS(translator);
+
+  addVarTable(translator, error);
+  if (*error) CLEAN_RESOURCES(false, token);
+
+  db::Token body = getFunctionBody(translator, fail, error);
+
+  if (*fail || *error)
+    HANDLE_ERROR("Expected static body", true, token);
+
+  static int countOfStatic = 0;
+  char name[MAX_NAME_SIZE] = "";
+  sprintf(name, "$static_%d", countOfStatic++);
+
+  char *string = db::addString(&translator->stringPool, name, error);
+
+  token->left  = NAM(string);
+  token->left->right = ST(db::statement_t::STATEMENT_VOID);
+  token->right = body;
+
+  db::addStatic(token, translator, error);
+
+  db::removeVarTable(translator, error);
+  if (*error) CLEAN_RESOURCES(false, token);
+
+  return token;
+}
+
 static db::Token getDeclaration(db::Translator *translator, bool *fail, int *error)
 {
   CHECK_ARGS(nullptr);
 
-  bool hasntDeclaration = false;
-  db::Token declaration = getFunctionDeclaration(translator, &hasntDeclaration, error);
-  if (*error) ERROR(nullptr);
-  if (hasntDeclaration)
-    declaration = getVariableDeclaration(translator, fail, error);
+  bool hasntDeclaration = true;
+  db::Token declaration = nullptr;
+  TRY_GET_CHAR(hasntDeclaration, declaration, getFunctionDeclaration);
+  TRY_GET_CHAR(hasntDeclaration, declaration, getVariableDeclaration);
+  TRY_GET_CHAR(hasntDeclaration, declaration, getStaticBlock        );
+  if (hasntDeclaration) FAIL(nullptr);
 
   return declaration;
 }
@@ -604,94 +422,84 @@ static db::Token getFunctionDeclaration(db::Translator *translator, bool *fail, 
   db::Token name = TOKEN(translator);
 
   if (!IS_NAME(name))
-    {
-      handleError("Expected name at Line: %d at Position: %d!",
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
+    HANDLE_ERROR("Expected name", false, token);
 
-      db::removeNode(token);
-      FAIL(nullptr);
-    }
   INCREASE_TOKENS(translator);
 
-  CHECK(IS_OPEN       , "("          , name);
+  CHECK(IS_OPEN , "(", name);
 
   bool hasParam = false;
   db::Token parameters = getParameterList(translator, &hasParam, error);
-  if (*error) ERROR(nullptr);
+  if (*error) CLEAN_RESOURCES(false, token, name);
   name->left = parameters;
 
-  CHECK(IS_CLOSE      , ")"          , name);
+  CHECK(IS_CLOSE, ")", name);
 
   db::Token returnType = nullptr;
 
+  bool isTryVoid = false;
+
   if (IS_COL(TOKEN(translator)))
     {
-      db::removeNode(TOKEN(translator));
-      INCREASE_TOKENS(translator);
+      CLEAN_TOKEN(translator);
 
       returnType = TOKEN(translator);
 
       if (!IS_TYPE(returnType) && !IS_VOID(returnType))
-        {
-          handleError("Expected return type at Line: %d at Position: %d!",
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
-
-          db::removeNode(token);
-          db::removeNode(name);
-          ERROR(nullptr);
-        }
+        HANDLE_ERROR("Expected return type", false, token, name);
       INCREASE_TOKENS(translator);
 
+      isTryVoid = IS_VOID(returnType);
     }
   else
     returnType = ST(db::STATEMENT_VOID);
 
   addVarTable(translator, error);
   for (db::Token temp = parameters; temp; temp = temp->right)
-    addVariable(NAME(temp->left->left), false, translator, 0, "", error);
-  if (*error)
-    {
-      db::removeNode(token);
-      db::removeNode(name);
-      ERROR(nullptr);
-    }
+    addVariable(NAME(temp->left->left), false, translator, 0, error);
+  if (*error) CLEAN_RESOURCES(false, token, name);
 
   token->left  = name;
   token->left->right = returnType;
 
   if (!addFunction(NAME(name), token, translator))
-    {
-      handleError("Redeclared of function at Line: %d at Position: %d!",
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
+    HANDLE_ERROR("Redeclared of function", true, token);
 
-      db::removeNode(token);
-      ERROR(nullptr);
-    }
-
+  translator->status.returnType = (IS_TYPE(returnType) ?
+                                  db::ReturnType::Type :
+                                  db::ReturnType::Void);
   db::Token body = getFunctionBody(translator, fail, error);
+  translator->status.returnType = db::ReturnType::None;
 
-  if (*fail || *error)
+  if (*error || (*fail && !IS_ASSIGN(TOKEN(translator))))
+    HANDLE_ERROR("Expected function body", true, token);
+
+  if (*fail && !isTryVoid)
     {
-      handleError("Expected function body at Line: %d at Position: %d!",
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
+      *fail = false;
+      CLEAN_TOKEN(translator);
+      STATEMENT(token->left->right) = db::STATEMENT_TYPE;
 
-      db::removeNode(token);
-      db::removeVarTable(translator, error);
-      ERROR(nullptr);
+      db::Token expression = getExpression(translator, fail, error);
+
+      if (*fail || *error)
+        HANDLE_ERROR("Expected function body", true, token);
+
+      body = CMD(ST(db::STATEMENT_RETURN), nullptr);
+      body->left->left = expression;
+
+      CHECK(IS_SEM, ";", body);
     }
+  else if (*fail)
+    HANDLE_ERROR("Return type is Void", true, token);
 
   token->right = body;
 
   db::removeVarTable(translator, error);
-  if (*error)
-    {
-      db::removeNode(token);
-      ERROR(nullptr);
-    }
+  if (*error) CLEAN_RESOURCES(false, token);
+
+  if (!strcmp(NAME(name), "main"))
+    translator->status.hasMain = true;
 
   return token;
 }
@@ -708,20 +516,12 @@ static db::Token getVariableDeclaration(db::Translator *translator, bool *fail, 
   db::Token name = TOKEN(translator);
 
   if (!IS_NAME(name))
-    {
-      handleError("Expected name at Line: %d at Position: %d!",
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
-
-      db::removeNode(token);
-      ERROR(nullptr);
-    }
+    HANDLE_ERROR("Expected name", false, token);
   INCREASE_TOKENS(translator);
 
   if (IS_COL(TOKEN(translator)))
     {
-      db::removeNode(TOKEN(translator));
-      INCREASE_TOKENS(translator);
+      CLEAN_TOKEN(translator);
       CHECK(IS_TYPE, "value type", name);
     }
 
@@ -730,41 +530,16 @@ static db::Token getVariableDeclaration(db::Translator *translator, bool *fail, 
   db::Token value = getExpression(translator, fail, error);
 
   if (!value)
-    {
-      handleError("Expected value at Line: %d at Position: %d!",
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
-
-      db::removeNode(token);
-      db::removeNode(name);
-      ERROR(nullptr);
-    }
+    HANDLE_ERROR("Expected value", false, token, name);
 
   if (!addVariable(NAME(name), isConst, translator, 0))
-    {
-      handleError("Redeclared of variable at Line: %d at Position: %d!",
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
-
-      db::removeNode(name);
-      db::removeNode(value);
-      db::removeNode(token);
-      ERROR(nullptr);
-    }
+    HANDLE_ERROR("Redeclared of variable", false, token, value, name);
 
   db::setChildren(token, name, value);
 
   if (!IS_SEM(TOKEN(translator)))
-    {
-      handleError("Expected ; at Line: %d at Position: %d!",
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
-
-      db::removeNode(token);
-      ERROR(nullptr);
-    }
-  db::removeNode(TOKEN(translator));
-  INCREASE_TOKENS(translator);
+    HANDLE_ERROR("Expected ;", false, token);
+  CLEAN_TOKEN(translator);
 
   return token;
 }
@@ -783,13 +558,13 @@ static db::Token getArgumentList(db::Translator *translator, bool *fail, int *er
       *freePosition = PARAM(expression, nullptr);
       freePosition = &(*freePosition)->right;
 
-      if (IS_COMMA(TOKEN(translator)))
-        {
-          db::removeNode(TOKEN(translator));
-          INCREASE_TOKENS(translator);
-        }
+      if (IS_COMMA(TOKEN(translator))) CLEAN_TOKEN(translator);
+      else break;
+
       bool hasntExpression = false;
       expression = getExpression(translator, &hasntExpression, error);
+      if (hasntExpression)
+        HANDLE_ERROR("Expected argument", false, token);
     }
 
   if (!token) FAIL(nullptr);
@@ -806,41 +581,38 @@ static db::Token getParameterList(db::Translator *translator, bool *fail, int *e
 
   while (IS_NAME(TOKEN(translator)))
     {
+      db::Token expression = nullptr;
       db::Token parameter = TOKEN(translator);
       INCREASE_TOKENS(translator);
 
       if (!IS_COL(TOKEN(translator)))
-        {
-          handleError("Expected : at Line: %d at Position: %d!",
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
+        HANDLE_ERROR("Expected :", false, token, parameter);
 
-          db::removeNode(parameter);
-          ERROR(nullptr);
-        }
-      db::removeNode(TOKEN(translator));
-      INCREASE_TOKENS(translator);
+      CLEAN_TOKEN(translator);
 
       if (!IS_TYPE(TOKEN(translator)))
+        HANDLE_ERROR("Expected argument type", false, token, parameter);
+      CLEAN_TOKEN(translator);
+
+      if (IS_ASSIGN(TOKEN(translator)))
         {
-          handleError("Expected argument type at Line: %d at Position: %d!",
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
+          CLEAN_TOKEN(translator);
 
-          db::removeNode(parameter);
-          ERROR(nullptr);
+          expression = getExpression(translator, fail, error);
+          if (*error) CLEAN_RESOURCES(false, token, parameter);
+          if (*fail)
+            HANDLE_ERROR("Expected argument value", false, token, parameter);
         }
-      db::removeNode(TOKEN(translator));
-      INCREASE_TOKENS(translator);
 
-      *freePosition = PARAM(VARIABLE(parameter, nullptr), nullptr);
+      *freePosition = PARAM(VARIABLE(parameter, expression), nullptr);
       freePosition = &(*freePosition)->right;
 
       if (IS_COMMA(TOKEN(translator)))
-        {
-          db::removeNode(TOKEN(translator));
-          INCREASE_TOKENS(translator);
-        }
+        CLEAN_TOKEN(translator);
+      else break;
+
+      if (!IS_NAME(TOKEN(translator)))
+        HANDLE_ERROR("Expected parameter type", false, token);
     }
 
   if (!token) FAIL(nullptr);
@@ -856,8 +628,7 @@ static db::Token getFunctionBody(db::Translator *translator, bool *fail, int *er
 
   if (IS_START_BRACE(TOKEN(translator)))
     {
-      db::removeNode(TOKEN(translator));
-      INCREASE_TOKENS(translator);
+      CLEAN_TOKEN(translator);
 
       db::Token *freePosition = &token;
 
@@ -865,11 +636,7 @@ static db::Token getFunctionBody(db::Translator *translator, bool *fail, int *er
       while (!hasntCommand)
         {
           db::Token instruction = getInstruction(translator, &hasntCommand, error);
-          if (*error)
-            {
-              if (token) db::removeNode(token);
-              ERROR(nullptr);
-            }
+          if (*error) CLEAN_RESOURCES(false, token);
           if (!instruction) break;
 
           *freePosition = CMD(instruction, nullptr);
@@ -877,23 +644,10 @@ static db::Token getFunctionBody(db::Translator *translator, bool *fail, int *er
         }
 
       if (!token)
-        {
-          handleError("Expected at least one instruction at Line: %d at Position: %d!",
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
-
-          ERROR(nullptr);
-        }
+        HANDLE_ERROR("Expected at least one instruction", false);
 
       if (!IS_END_BRACE(TOKEN(translator)))
-        {
-          handleError("Expected an } at Line: %d at Position: %d!",
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
-
-          db::removeNode(token);
-          ERROR(nullptr);
-        }
+        HANDLE_ERROR("Expected }", false, token);
       db::removeNode(TOKEN(translator));
       INCREASE_TOKENS(translator);
     }
@@ -914,8 +668,7 @@ static db::Token getInput(db::Translator *translator, bool *fail, int *error)
 
   INCREASE_TOKENS(translator);
 
-  CHECK(IS_GREATER, ">>", token);
-  CHECK(IS_GREATER, ">>", token);
+  CHECK(IS_INPUT, ">>", token);
 
   db::Token variable = nullptr;
 
@@ -927,25 +680,19 @@ static db::Token getInput(db::Translator *translator, bool *fail, int *error)
       *freePosition = PARAM(variable, nullptr);
       freePosition = &(*freePosition)->right;
 
-      if (IS_GREATER(TOKEN(translator)))
+      if (IS_INPUT(TOKEN(translator)))
         {
-          CHECK(IS_GREATER, ">>", token);
-          CHECK(IS_GREATER, ">>", token);
+          CHECK(IS_INPUT, ">>", token);
           variable = nullptr;
         }
+      else
+        break;
     }
 
   if (!variable)
-    {
-      handleError("Expected a variable at Line: %d at Position: %d!",
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
+    HANDLE_ERROR("Expected a variable", false, token);
 
-      db::removeNode(token);
-      ERROR(nullptr);
-    }
-
-  CHECK(IS_SEM, ";", token);
+  CHECK(IS_SEM, ";", nullptr);
 
   return token;
 }
@@ -965,11 +712,8 @@ static db::Token getOutput(db::Translator *translator, bool *fail, int *error)
 
   do
     {
-      if (IS_LESS(TOKEN(translator)))
-        {
-          CHECK(IS_LESS, "<<", token);
-          CHECK(IS_LESS, "<<", token);
-        }
+      if (IS_OUTPUT(TOKEN(translator)))
+          CHECK(IS_OUTPUT, "<<", token);
       else
         break;
 
@@ -980,14 +724,7 @@ static db::Token getOutput(db::Translator *translator, bool *fail, int *error)
       if (*fail &&
           !IS_STRING(TOKEN(translator)) &&
           !IS_ENDL(TOKEN(translator)))
-        {
-          handleError("Expected an expression or string at Line: %d at Position: %d!",
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
-
-          db::removeNode(token);
-          ERROR(nullptr);
-        }
+        HANDLE_ERROR("Expected an expression or string", false, token);
 
       if (!expression)
         {
@@ -1001,9 +738,9 @@ static db::Token getOutput(db::Translator *translator, bool *fail, int *error)
 
     } while (expression);
 
-  if (!token->left) { db::removeNode(token); ERROR(nullptr); }
+  if (!token->left) CLEAN_RESOURCES(false, token);
 
-  CHECK(IS_SEM, ";", token);
+  CHECK(IS_SEM, ";", nullptr);
 
   return token;
 }
@@ -1019,25 +756,11 @@ static db::Token getExpression(db::Translator *translator, bool *fail, int *erro
   if (IS_ASSIGN(TOKEN(translator)))
     {
       if (!IS_NAME(token))
-        {
-          handleError("Expected variable before Line: %d at Position: %d!",
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
-
-          db::removeNode(token);
-          ERROR(nullptr);
-        }
+        HANDLE_ERROR("Expected variable", false, token);
       db::Variable *var = searchVariable(NAME(token), translator);
 
       if (var->isConst)
-        {
-          handleError("Value cannot be change at Line: %d at Position: %d!",
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
-
-          db::removeNode(token);
-          ERROR(nullptr);
-        }
+        HANDLE_ERROR("Value cannot be change", false, token);
 
       db::Token opToken = TOKEN(translator);
       INCREASE_TOKENS(translator);
@@ -1060,21 +783,13 @@ static db::Token getLogicOrExpression(db::Translator *translator, bool *fail, in
   db::Token token = getLogicAndExpression(translator, fail, error);
   if (*error) ERROR(nullptr);
 
-  while (IS_OR(TOKEN(translator)) && IS_OR(*(translator->tokens+1)))
+  while (IS_OR(TOKEN(translator)))
     {
       db::Token opToken = TOKEN(translator);
       INCREASE_TOKENS(translator);
-      db::removeNode(TOKEN(translator));
-      INCREASE_TOKENS(translator);
 
       db::Token tempToken = getLogicAndExpression(translator, fail, error);
-
-      if (*fail || *error)
-        {
-          db::removeNode(token);
-          db::removeNode(opToken);
-          ERROR(nullptr);
-        }
+      if (*fail || *error) CLEAN_RESOURCES(false, token, opToken);
 
       token = db::setChildren(opToken, token, tempToken);
     }
@@ -1089,21 +804,13 @@ static db::Token getLogicAndExpression(db::Translator *translator, bool *fail, i
   db::Token token = getEqualExpression(translator, fail, error);
   if (*error) ERROR(nullptr);
 
-  while (IS_AND(TOKEN(translator)) && IS_AND(*(translator->tokens+1)))
+  while (IS_AND(TOKEN(translator)))
     {
       db::Token opToken = TOKEN(translator);
       INCREASE_TOKENS(translator);
-      db::removeNode(TOKEN(translator));
-      INCREASE_TOKENS(translator);
 
       db::Token tempToken = getEqualExpression(translator, fail, error);
-
-      if (*fail || *error)
-        {
-          db::removeNode(token);
-          db::removeNode(opToken);
-          ERROR(nullptr);
-        }
+      if (*fail || *error) CLEAN_RESOURCES(false, token, opToken);
 
       token = db::setChildren(opToken, token, tempToken);
     }
@@ -1118,26 +825,13 @@ static db::Token getEqualExpression(db::Translator *translator, bool *fail, int 
   db::Token token = getRelationExpression(translator, fail, error);
   if (*error) ERROR(nullptr);
 
-  while ((IS_ASSIGN(TOKEN(translator)) || IS_NOT(TOKEN(translator)))
-         && IS_ASSIGN(*(translator->tokens+1)))
+  while (IS_EQUAL(TOKEN(translator)) || IS_NOT_EQUAL(TOKEN(translator)))
     {
       db::Token opToken = TOKEN(translator);
-      if (IS_NOT(opToken))
-        STATEMENT(opToken) = db::STATEMENT_NOT_EQUAL;
-      else
-        STATEMENT(opToken) = db::STATEMENT_EQUAL;
-      INCREASE_TOKENS(translator);
-      db::removeNode(TOKEN(translator));
       INCREASE_TOKENS(translator);
 
       db::Token tempToken = getRelationExpression(translator, fail, error);
-
-      if (*fail || *error)
-        {
-          db::removeNode(token);
-          db::removeNode(opToken);
-          ERROR(nullptr);
-        }
+      if (*fail || *error) CLEAN_RESOURCES(false, token, opToken);
 
       token = db::setChildren(opToken, token, tempToken);
     }
@@ -1152,24 +846,17 @@ static db::Token getRelationExpression(db::Translator *translator, bool *fail, i
   db::Token token = getAdditiveExpression(translator, fail, error);
   if (*error) ERROR(nullptr);
 
-  while (
-         (IS_LESS(TOKEN(translator)) && !IS_LESS(*(translator->tokens+1))) ||
-         (IS_GREATER(TOKEN(translator)) &&
-          !IS_GREATER(*(translator->tokens+1)))
-        )
+  while (IS_LESS(      TOKEN(translator)) ||
+         IS_GREATER(   TOKEN(translator)) ||
+         IS_LESS_EQ(   TOKEN(translator)) ||
+         IS_GREATER_EQ(TOKEN(translator)))
 
     {
       db::Token opToken = TOKEN(translator);
       INCREASE_TOKENS(translator);
 
       db::Token tempToken = getAdditiveExpression(translator, fail, error);
-
-      if (*fail || *error)
-        {
-          db::removeNode(token);
-          db::removeNode(opToken);
-          ERROR(nullptr);
-        }
+      if (*fail || *error) CLEAN_RESOURCES(false, token, opToken);
 
       token = db::setChildren(opToken, token, tempToken);
     }
@@ -1190,13 +877,7 @@ static db::Token getAdditiveExpression(db::Translator *translator, bool *fail, i
       INCREASE_TOKENS(translator);
 
       db::Token tempToken = getMultiplicativeExpression(translator, fail, error);
-
-      if (*fail || *error)
-        {
-          if (token) db::removeNode(token);
-          db::removeNode(opToken);
-          ERROR(nullptr);
-        }
+      if (*fail || *error) CLEAN_RESOURCES(false, token, opToken);
 
       token = db::setChildren(opToken, token, tempToken);
     }
@@ -1217,12 +898,7 @@ static db::Token getMultiplicativeExpression(db::Translator *translator, bool *f
       INCREASE_TOKENS(translator);
 
       db::Token tempToken = getFunctionExpression(translator, fail, error);
-
-      if (*fail || *error)
-        {
-          db::removeNode(token);
-          ERROR(nullptr);
-        }
+      if (*fail || *error) CLEAN_RESOURCES(false, token, opToken);
 
       token = db::setChildren(opToken, token, tempToken);
     }
@@ -1241,12 +917,7 @@ static db::Token getFunctionExpression(db::Translator *translator, bool *fail, i
       INCREASE_TOKENS(translator);
 
       db::Token expression = gePostfixtExpression(translator, fail, error);
-
-      if (*fail || *error)
-        {
-          db::removeNode(token);
-          ERROR(nullptr);
-        }
+      if (*fail || *error) CLEAN_RESOURCES(false, token);
 
       token->left = expression;
     }
@@ -1273,21 +944,17 @@ static db::Token gePostfixtExpression(db::Translator *translator, bool *fail, in
                            );
 
       if (!funToken)
-        {
-          handleError("Unknown function found: '%s!' at Line: %d at Position: %d!",
-                      NAME(TOKEN(translator)),
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
-          ERROR(nullptr);
-        }
+        HANDLE_ERROR_WITH_NAME(
+                               "Unknown function found: '%s'",
+                               NAME(TOKEN(translator)),
+                               false
+                              );
       if (IS_VOID(funToken->left->right))
-        {
-          handleError("Use Void-type value in expression: '%s' at Line: %d at Position: %d!",
-                      NAME(TOKEN(translator)),
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
-          ERROR(nullptr);
-        }
+        HANDLE_ERROR_WITH_NAME(
+                               "Use Void-type value in expression: '%s'",
+                               NAME(TOKEN(translator)),
+                               false
+                              );
       INCREASE_TOKENS(translator);
 
       db::Token callNode = ST(db::STATEMENT_CALL);
@@ -1297,31 +964,14 @@ static db::Token gePostfixtExpression(db::Translator *translator, bool *fail, in
 
       bool hasntArguments = false;
       db::Token arguments = getArgumentList(translator, &hasntArguments, error);
-      if (*error)
-        {
-          db::removeNode(callNode);
-          ERROR(nullptr);
-        }
+      if (*error) CLEAN_RESOURCES(false, callNode);
+
+      bool hasFail = false;
+      arguments = callFunction(funToken->left->left, arguments, &hasFail);
       token->left = arguments;
 
-      int paramCount = 0;
-      for (db::Token temp = funToken->left->left; temp; temp = temp->right)
-        ++paramCount;
-
-      int argCount = 0;
-      for (db::Token temp = arguments; temp; temp = temp->right)
-        ++argCount;
-
-      bool correctArguments = (paramCount == argCount);
-
-      if (!correctArguments)
-        {
-          handleError("Incorrect call of function at Line: %d at Position: %d!",
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
-          db::removeNode(callNode);
-          ERROR(nullptr);
-        }
+      if (hasFail)
+        HANDLE_ERROR("Incorrect call of function", false, callNode);
 
       CHECK(IS_CLOSE, ")", callNode);
 
@@ -1337,39 +987,37 @@ static db::Token getPrimaryExpression(db::Translator *translator, bool *fail, in
 
   db::Token token = TOKEN(translator);
 
-  if (IS_OPEN(token))
+  if (IS_OPEN(token) || IS_START_SQUARE_BRACE(token))
     {
-      db::removeNode(token);
-      INCREASE_TOKENS(translator);
+      bool isSquare = IS_START_SQUARE_BRACE(token);
+
+      CLEAN_TOKEN(translator);
 
       token = getExpression(translator, fail, error);
-      if (*error) ERROR(nullptr);
+      if (*fail || *error) ERROR(nullptr);
 
-      if (!IS_CLOSE(TOKEN(translator)))
+      if (!isSquare && !IS_CLOSE(TOKEN(translator)))
+        HANDLE_ERROR("Expected )", false, token);
+      else if (isSquare && !IS_END_SQUARE_BRACE(TOKEN(translator)))
+        HANDLE_ERROR("Expected ]", false, token);
+
+      CLEAN_TOKEN(translator);
+
+      if (isSquare)
         {
-          handleError("Expected ')' at Line: %d at Position: %d!",
-                      TOKEN(translator)->position.line,
-                      TOKEN(translator)->position.position);
-          if (token) db::removeNode(token);
-          ERROR(nullptr);
+          db::Token temp = ST(db::STATEMENT_INT);
+
+          temp->left = token;
+          token = temp;
         }
-      db::removeNode(TOKEN(translator));
-      INCREASE_TOKENS(translator);
     }
   else
     {
-      bool hasntVariable = false;
-      token = getNumber(translator, &hasntVariable, error);
-      if (*error) ERROR(nullptr);
-      if (hasntVariable)
-        {
-          hasntVariable = false;
-          token = getValue(translator, &hasntVariable, error);
-          if (*error) ERROR(nullptr);
-        }
-      if (hasntVariable)
-        token = getVariable(translator, fail, error);
-      if (*error) ERROR(nullptr);
+      bool hasntVariable = true;
+      TRY_GET_CHAR(hasntVariable, token, getNumber  );
+      TRY_GET_CHAR(hasntVariable, token, getValue   );
+      TRY_GET_CHAR(hasntVariable, token, getVariable);
+      if (hasntVariable) FAIL(nullptr);
     }
 
   return token;
@@ -1397,25 +1045,19 @@ static db::Token getVariable(db::Translator *translator, bool *fail, int *error)
   db::Variable *var = db::searchVariable(NAME(token), translator);
 
   if (!var)
-    {
-      handleError("Unknown variable: %s at Line: %d at Position: %d!",
-                  NAME(token),
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
-
-      ERROR(nullptr);
-    }
+    HANDLE_ERROR_WITH_NAME(
+                           "Unknown variable: '%s'",
+                           NAME(token),
+                           false
+                          );
   INCREASE_TOKENS(translator);
   if (var->isConst)
-    {
-      handleError("Found value: %s at Line: %d at Position: %d!",
-                  NAME(token),
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
-
-      db::removeNode(token);
-       ERROR(nullptr);
-    }
+    HANDLE_ERROR_WITH_NAME(
+                           "Found value: '%s'",
+                           NAME(token),
+                           false,
+                           token
+                          );
 
   return token;
 }
@@ -1430,14 +1072,11 @@ static db::Token getValue(db::Translator *translator, bool *fail, int *error)
   db::Variable *val = db::searchVariable(NAME(token), translator);
 
   if (!val)
-    {
-      handleError("Unknown value: %s at Line: %d at Position: %d!",
-                  NAME(token),
-                  TOKEN(translator)->position.line,
-                  TOKEN(translator)->position.position);
-
-      ERROR(nullptr);
-    }
+    HANDLE_ERROR_WITH_NAME(
+                           "Unknown value: '%s'",
+                           NAME(token),
+                           false
+                          );
   if (!val->isConst)
     FAIL(nullptr);
   INCREASE_TOKENS(translator);

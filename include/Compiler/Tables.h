@@ -1,11 +1,12 @@
 #pragma once
 
+#include "StringPool.h"
 #include "Tree.h"
 
 namespace db {
 
   struct Variable {
-    char *name;
+    const char *name;
     int number;
     bool isConst;
     bool isGlobal;
@@ -20,7 +21,7 @@ namespace db {
   };
 
   struct Function {
-    char *name;
+    const char *name;
     bool hasReturn;
     Token token;
   };

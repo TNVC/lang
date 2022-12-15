@@ -1,11 +1,17 @@
 #include "Translator.h"
 
+#include "ErrorHandler.h"
+#include "StringsUtils.h"
 #include "Error.h"
 #include "Assert.h"
 #include "DSL.h"
 
+#pragma GCC diagnostic ignored "-Wswitch-enum"
+
 #define CASE(STATEMENT, NAME)                                         \
   case db::STATEMENT_ ## STATEMENT: fprintf(target, " " #NAME " "); break;
+
+static const char *getNodePrefix(db::Token token, int *error);
 
 static void printSpaces(int count, FILE *target);
 
@@ -32,12 +38,6 @@ void db::saveTranslator(
   if (errorCode) ERROR();
 }
 
-/*
-void loadTranslator(
-                    Translator *translator,
-                    FILE *source,
-                    int *error
-                    );*/
 static void saveToken(const db::Token token, FILE *target, int *error)
 {
   assert(token);
@@ -45,8 +45,10 @@ static void saveToken(const db::Token token, FILE *target, int *error)
 
   static int tabs = 0;
 
+  const char *prefix = getNodePrefix(token, error);
+
   printSpaces(tabs, target);
-  fprintf(target, " { ");
+  fprintf(target, " %s { ", prefix);
 
   tabs += 2;
 
@@ -60,64 +62,45 @@ static void saveToken(const db::Token token, FILE *target, int *error)
             CASE(SUB, SUB);
             CASE(MUL, MUL);
             CASE(DIV, DIV);
-
-            CASE(SIN , $db::math SIN  $);
-            CASE(COS , $db::math COS  $);
-            CASE(SQRT, $db::math SQRT $);
-
+            CASE(SIN , SIN );
+            CASE(COS , COS );
+            CASE(SQRT, SQRT);
             CASE(ASSIGNMENT, EQ);
-
             CASE(IF  , IF  );
             CASE(ELSE, ELSE);
-
             CASE(WHILE, WHILE);
             CASE(COMPOUND, ST);
             CASE(FUN, FUNC);
-
-            CASE(TYPE, $db::type DOUBLE $);
-            CASE(VOID, $db::type VOID $);
-
+            CASE(STATIC, STATIC)
+            CASE(TYPE, TYPE);
+            CASE(VOID, VOID);
             CASE(PARAMETER, PARAM);
             CASE(RETURN, RET);
             CASE(CALL, CALL);
-
           case db::STATEMENT_VAL:
             CASE(VAR, VAR);
-
-          CASE(OUT, $db::io OUT $);
-          CASE(IN , $db::io IN  $);
-
-
-          CASE(EQUAL    , $db::relation IS_EE $);
-          CASE(NOT_EQUAL, $db::relation IS_NE $);
-          CASE(LESS     , $db::relation IS_BT $);
-          CASE(GREATER  , $db::relation IS_GT $);
-
-          CASE(OR , $db::logic OR  $);
-          CASE(AND, $db::logic AND $);
-
-          CASE(NEW_LINE, $db::str ENDL $);
-
-          case db::STATEMENT_COLON:
-          case db::STATEMENT_START_BRACE:
-          case db::STATEMENT_END_BRACE:
-          case db::STATEMENT_COMMA:
-          case db::STATEMENT_NOT:
-          case db::STATEMENT_SEMICOLON:
-          case db::STATEMENT_OPEN:
-          case db::STATEMENT_CLOSE:
-          case db::STATEMENT_END:
-          case db::STATEMENT_ERROR:
+            CASE(OUT, OUT);
+            CASE(IN , IN );
+            CASE(EQUAL    , IS_EE);
+            CASE(NOT_EQUAL, IS_NE);
+            CASE(LESS     , IS_BT);
+            CASE(GREATER  , IS_GT);
+            CASE(   LESS_OR_EQUAL, IS_BE);
+            CASE(GREATER_OR_EQUAL, IS_GE);
+            CASE(OR , OR );
+            CASE(AND, AND);
+            CASE(NEW_LINE, ENDL);
+            CASE(INT, MOD);
           default: break;
           }
         break;
       }
     case db::type_t::NAME:
-      { fprintf(target, " \"%s\" "              ,   NAME(token)); break; }
+      { fprintf(target, " \"%s\" ",   NAME(token)); break; }
     case db::type_t::NUMBER:
-      { fprintf(target, " %lg "                 , NUMBER(token)); break; }
+      { fprintf(target, " %lg "   , NUMBER(token)); break; }
     case db::type_t::STRING:
-      { fprintf(target, " $db::str \"%s\" $ "   , STRING(token)); break; }
+      { fprintf(target, " '%s' "  , STRING(token)); break; }
     default: break;
     }
 
@@ -126,31 +109,43 @@ static void saveToken(const db::Token token, FILE *target, int *error)
       fprintf(target, "\n");
       saveToken(token->left , target, error);
     }
-  else if (IS_STATEMENT(token) || IS_NAME(token))
+  else if (IS_STATEMENT(token) || (IS_NAME(token) && token->right))
     {
-      if (token->right)
-        {
-          fprintf(target, "\n");
-          printSpaces(tabs, target);
-        }
-      fprintf(target, " { NIL } ");
-      if (token->right) fprintf(target, "\n");
+      fprintf(target, "\n");
+      printSpaces(tabs, target);
+      fprintf(target, "  { NIL } \n");
     }
 
   if (token->right)
+    saveToken(token->right, target, error);
+  else if (IS_STATEMENT(token) || (IS_NAME(token) && token->right))
     {
-      saveToken(token->right, target, error);
-      fprintf(target, "\n");
-    }
-  else if (IS_STATEMENT(token) || IS_NAME(token))
-    {
-      if (token->left)
-        printSpaces(tabs, target);
-      fprintf(target, " { NIL } \n");
+      printSpaces(tabs, target);
+      fprintf(target, "  { NIL } \n");
     }
 
   tabs -= 2;
   if (IS_STATEMENT(token) || (IS_NAME(token) && (token->left || token->right)))
     printSpaces(tabs, target);
-  fprintf(target, " } \n");
+  fprintf(target, "  } %c \n", *prefix ? '$' : ' ');
+}
+
+static const char *getNodePrefix(db::Token token, int *error)
+{
+  if (!token) ERROR(nullptr);
+
+  if (IS_STRING(token) || IS_ENDL(token))
+    return " $db::str ";
+  if (IS_SQRT(token) || IS_INT(token))
+    return " $db::math ";
+
+  if (IS_EQUAL(token)   || IS_NOT_EQUAL(token) ||
+      IS_LESS(token)    || IS_GREATER(token)   ||
+      IS_LESS_EQ(token) || IS_GREATER_EQ(token))
+    return " $db::relation ";
+
+  if (IS_OR(token) || IS_AND(token))
+    return " $db::logic ";
+
+  return "";
 }

@@ -1,9 +1,9 @@
 #pragma once
 
 /// Name of default directory for files
-const char * const DEFAULT_DIRECTORY = "./resources/";
+const char * const DEFAULT_DIRECTORY = "../resources/";
 /// Name of target file if didn`t input anything
-const char * const DEFAULT_TARGET_FILE_NAME = "target.asm";
+const char * const DEFAULT_TARGET_FILE_NAME = "syntax.std";
 /// Name of source file if didn`t input anything
 const char * const DEFAULT_SOURCE_FILE_NAME = "main.kt";
 

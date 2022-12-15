@@ -187,20 +187,22 @@ static int handleHelp(Settings *settings)
   db::getBundle(&bundle, "help");
 
   const char *separator = db::getString(&bundle, "help.separator");
+  
+  const char *countString = db::getString(&bundle, "help.count");
+  
+  int count = 0;
+  sscanf(countString, "%d", &count);
 
-  printf(
-         "%s%s%s%s%s%s%s%s%s%s%s", settings->programName,
-         db::getString(&bundle, "help.first"),
-         separator,
-         db::getString(&bundle, "help.second"),
-         separator,
-         db::getString(&bundle, "help.third"),
-         separator,
-         db::getString(&bundle, "help.fourth"),
-         separator,
-         db::getString(&bundle, "help.fifth"),
-         separator
-         );
+  printf("%s", settings->programName);
+
+  char buffer[16] = "";
+  for (int i = 0; i < count; ++i)
+  {
+    sprintf(buffer, "help.num%d", i+1);
+    printf("%s%s", 
+      db::getString(&bundle, buffer),
+      separator);
+  }
 
   db::destroyBundle(&bundle);
 

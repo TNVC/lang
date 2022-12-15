@@ -7,11 +7,34 @@
 
 namespace db {
 
+  const int COUNT_OF_STATIC_BLOCK_TYPE = 2;
+
+  enum class ReturnType {
+    Type,
+    Void,
+    None,
+  };
+
+  struct TranslatorStatus {
+    const char *sourceName;
+    ReturnType returnType;
+    bool hasMain;
+    int stackOffset;
+  };
+
   struct Translator {
-    Stack varTables;
+    Stack    varTables;
     FunTable functions;
+
+    FunTable previousStaticBlocks;
+    FunTable     nextStaticBlocks;
+
+    TranslatorStatus status;
+
     Token *tokens;
     Grammar grammar;
+
+    StringPool stringPool;
 
     Translator &operator=(const Translator &original) = delete;
   };
@@ -51,12 +74,14 @@ namespace db {
                    Translator *translator,
                    int *error = nullptr
                   );
+
+  bool addStatic(Token staticBlock, Translator *translator, int *error = nullptr);
+
   bool addVariable(
                    const char *name,
                    bool isConst,
                    Translator *translator,
                    int number,
-                   const char *prefix = "",
                    int *error = nullptr
                   );
 
@@ -69,9 +94,15 @@ namespace db {
                            const char *name,
                            const Translator *translator,
                            bool onlyTop = false,
-                           bool hasPrefix = false,
                            int *error = nullptr
                           );
+
+  bool isStatic(
+                const Token token,
+                const Translator *translator,
+                int *error = nullptr
+               );
+
 
   void    addVarTable(Translator *translator, int *error = nullptr);
   void removeVarTable(Translator *translator, int *error = nullptr);

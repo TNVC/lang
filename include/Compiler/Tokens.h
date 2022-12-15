@@ -44,14 +44,13 @@ namespace db {
     STATEMENT_LESS,
     STATEMENT_GREATER,
 
-    /*
-    STATEMENT_OUTPUT,//
-    STATEMENT_INPUT,//
-    STATEMENT_LESS_OR_EQUAL,//
-    STATEMENT_GREATER_OR_EQUAL,//
-    STATEMENT_UNION,//[x::y = 10;] <=> [x = 10; y = 10;] | [z = x::y + 5;]
-    */
-    
+    STATEMENT_OUTPUT,
+    STATEMENT_INPUT,
+    STATEMENT_LESS_OR_EQUAL,
+    STATEMENT_GREATER_OR_EQUAL,
+    STATEMENT_UNION,
+    STATEMENT_ARROW,
+
     STATEMENT_NOT,
     STATEMENT_AND,
     STATEMENT_OR,
@@ -60,6 +59,15 @@ namespace db {
     STATEMENT_EQUAL,
 
     STATEMENT_NEW_LINE,
+
+    //    STATEMENT_ANNOTATION,//
+    STATEMENT_STATIC,//
+
+    STATEMENT_START_SQUARE_BRACE,
+    STATEMENT_END_SQUARE_BRACE,
+    STATEMENT_INT,
+
+    STATEMENT_POW,
   };
 
   const char *const STATEMENT_NAMES[] =
@@ -105,6 +113,13 @@ namespace db {
       "in",
       "\\<",
       "\\>",
+
+      "\\<\\<",
+      "\\>\\>",
+      "\\<=",
+      "\\>=",
+      "::",
+      "-\\>",
       "!",
       "&",
       "|",
@@ -112,6 +127,13 @@ namespace db {
       "!=",
 
       "new line",
+
+      "static",
+      "[",
+      "]",
+      "int",
+
+      "^"
   };
 
   struct PositionInfo {

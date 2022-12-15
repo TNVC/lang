@@ -1,4 +1,5 @@
 #include "TokenAnalysis.h"
+#include "StringPool.h"
 #include "DSL.h"
 
 #include <malloc.h>
@@ -8,12 +9,32 @@
 #include "SystemLike.h"
 #include "Error.h"
 
-#define EVAL_STATEMENT(STATEMENT, OFFSET)               \
-  do { stNum = STATEMENT; offset = OFFSET; } while (0)
+#pragma GCC diagnostic ignored "-Wpedantic"
 
-const size_t DEFAULT_TOKENS_SIZE = 16;
-const size_t GROWTH_FACTOR       =  2;
-const size_t MAX_NAME_SIZE       = 32;
+#define EVAL(STATEMENT)                                                 \
+  do                                                                    \
+    {                                                                   \
+      tokens[tokensSize  ]           = ST(db::STATEMENT_ ## STATEMENT); \
+      tokens[tokensSize++]->position = position;                        \
+    } while (0)
+
+#define UPDATE_LINE()                           \
+  do                                            \
+    {                                           \
+      ++position.line;                          \
+      position.position = 1;                    \
+    } while (0)
+
+#define UPDATE_POSITION(OFFSET)                 \
+  do                                            \
+    {                                           \
+      position.position += OFFSET;              \
+    } while (0)
+
+const size_t DEFAULT_TOKENS_SIZE =  16;
+const size_t GROWTH_FACTOR       =   2;
+const size_t MAX_NAME_SIZE       =  32;
+const size_t MAX_STRING_SIZE     = 128;
 
 struct Statement {
   const char *name;
@@ -55,58 +76,10 @@ const Statement STATEMENTS[] =
     {"if"    , db::STATEMENT_IF         , 2},
     {"else"  , db::STATEMENT_ELSE       , 4},
     {"while" , db::STATEMENT_WHILE      , 5},
+    {"static", db::STATEMENT_STATIC     , 6},
   };
 
-const int STATEMENTS_SIZE = 32;
-
-static void skipSpaces (
-                        const char **source,
-                        db::PositionInfo *position,
-                        int *error = nullptr
-                       );
-
-static void skipComments(
-                         const char **source,
-                         db::PositionInfo *position,
-                         int *error = nullptr
-                        );
-
-static bool getStatement(
-                         const char **source,
-                         db::PositionInfo *position,
-                         db::Token *token,
-                         int *error = nullptr
-                        );
-
-static bool getName    (
-                        const char **source,
-                        db::PositionInfo *position,
-                        db::Token *token,
-                        int *error = nullptr
-                       );
-
-static bool getNumber  (
-                        const char **source,
-                        db::PositionInfo *position,
-                        db::Token *token,
-                        int *error = nullptr
-                       );
-
-static bool getString  (
-                        const char **source,
-                        db::PositionInfo *position,
-                        db::Token *token,
-                        int *error = nullptr
-                       );
-
-static bool getError   (
-                        const char **source,
-                        db::PositionInfo *position,
-                        db::Token *token,
-                        int *error = nullptr
-                       );
-
-static bool isStatement(const char *name, int *error = nullptr);
+const int STATEMENTS_SIZE = 33;
 
 static db::Token *resizeTokens(db::Token *tokens, size_t newSize, int *error = nullptr);
 
@@ -118,6 +91,11 @@ static db::Token createNumber(db::number_t value)
 static db::Token createName(db::name_t value)
 {
   return db::createNode({.name = value}, db::type_t::NAME);
+}
+
+static db::Token createString(db::string_t value)
+{
+  return db::createNode({.string = value}, db::type_t::STRING);
 }
 
 static db::Token createStatement(db::statement_t value)
@@ -136,7 +114,7 @@ static db::Token *resizeTokens(db::Token *tokens, size_t newSize, int *error)
   return temp;
 }
 
-db::Token *db::getTokens(const char *source, int *error)
+db::Token *db::getTokens(const char *source, db::StringPool *pool, int *error)
 {
   if (!source) ERROR(nullptr);
 
@@ -149,8 +127,7 @@ db::Token *db::getTokens(const char *source, int *error)
 
   db::PositionInfo position{1, 1};
 
-  int errorCode = 0;
-  while (*source)
+  for ( ; *source; ++source)
     {
       if (tokensSize == tokensCapacity)
         {
@@ -160,27 +137,239 @@ db::Token *db::getTokens(const char *source, int *error)
           if (!tokens) ERROR(nullptr);
         }
 
-      skipSpaces(&source, &position, &errorCode);
-
-      bool wasRead = false;
-      if (!wasRead)
-        wasRead = getStatement(&source, &position, &tokens[tokensSize], &errorCode);
-      if (!wasRead)
-        wasRead = getNumber   (&source, &position, &tokens[tokensSize], &errorCode);
-      if (!wasRead)
-        wasRead = getName     (&source, &position, &tokens[tokensSize], &errorCode);
-      if (!wasRead)
-        wasRead = getString   (&source, &position, &tokens[tokensSize], &errorCode);
-      if (!wasRead)
+      switch (*source)
         {
-          wasRead = getError  (&source, &position, &tokens[tokensSize], &errorCode);
-          ++tokensSize;
-          break;
+        case ' ': case '\t': case '\n':
+          {
+            ++position.position;
+            if (*source == '\n') UPDATE_LINE();
+
+            break;
+          }
+
+        case '+': EVAL(ADD); UPDATE_POSITION(1);  break;
+        case '-':
+          {
+            ++source;
+            switch (*source)
+              {
+              case '>': EVAL(ARROW); UPDATE_POSITION(2); break;
+              default: --source; EVAL(SUB); UPDATE_POSITION(1); break;
+              }
+
+            break;
+          }
+        case '*': EVAL(MUL); UPDATE_POSITION(1); break;
+        case '/':
+          {
+            ++source;
+            switch (*source)
+              {
+              case '/':
+                {
+                  UPDATE_LINE();
+                  while (*source && *source != '\n') ++source;
+                  break;
+                }
+              case '*':
+                {
+                  for ( ; *source && !(*source == '*' && source[1] == '/'); ++source)
+                    {
+                      ++position.position;
+                      if (*source == '\n') UPDATE_LINE();
+                    }
+                  if (*source)
+                    ++source;
+
+                  break;
+                }
+              default: --source; EVAL(DIV); break;
+              }
+
+            break;
+          }
+
+        case '(': EVAL(OPEN ); UPDATE_POSITION(1); break;
+        case ')': EVAL(CLOSE); UPDATE_POSITION(1); break;
+        case '{': EVAL(START_BRACE); UPDATE_POSITION(1); break;
+        case '}': EVAL(  END_BRACE); UPDATE_POSITION(1); break;
+
+        case ':':
+          {
+            ++source;
+            switch (*source)
+              {
+              case ':': EVAL(UNION); UPDATE_POSITION(2); break;
+              default: --source; EVAL(COLON); UPDATE_POSITION(1); break;
+              }
+
+            break;
+          }
+        case ';': EVAL(SEMICOLON); UPDATE_POSITION(1); break;
+
+        case ',': EVAL(COMMA); UPDATE_POSITION(1); break;
+
+        case '>':
+          {
+            ++source;
+            switch (*source)
+              {
+              case '=': EVAL(GREATER_OR_EQUAL); UPDATE_POSITION(2); break;
+              case '>': EVAL(INPUT); UPDATE_POSITION(2); break;
+              default: --source; EVAL(GREATER); UPDATE_POSITION(1); break;
+              }
+
+            break;
+          }
+        case '<':
+          {
+            ++source;
+            switch (*source)
+              {
+              case '=': EVAL(LESS_OR_EQUAL); UPDATE_POSITION(2); break;
+              case '<': EVAL(OUTPUT); UPDATE_POSITION(2); break;
+              default: --source; EVAL(LESS); UPDATE_POSITION(1); break;
+              }
+
+            break;
+          }
+
+        case '=':
+          {
+            ++source;
+            switch (*source)
+              {
+              case '=': EVAL(EQUAL); UPDATE_POSITION(2); break;
+              default: --source; EVAL(ASSIGNMENT); UPDATE_POSITION(1); break;
+              }
+
+            break;
+          }
+
+          case '!':
+            {
+              ++source;
+              switch (*source)
+                {
+                case '=': EVAL(NOT_EQUAL); UPDATE_POSITION(2); break;
+                default: EVAL(NOT); UPDATE_POSITION(1); break;
+                }
+
+              break;
+            }
+          case '|':
+            {
+              ++source;
+              switch (*source)
+                {
+                case '|': EVAL(OR); UPDATE_POSITION(2); break;
+                default: --source; EVAL(ERROR); UPDATE_POSITION(1); break;
+                }
+
+              break;
+            }
+          case '&':
+            {
+              ++source;
+              switch (*source)
+                {
+                case '&': EVAL(AND); UPDATE_POSITION(2); break;
+                default: --source; EVAL(ERROR); UPDATE_POSITION(1); break;
+                }
+
+              break;
+            }
+
+          case '[':
+           {
+             EVAL(START_SQUARE_BRACE); UPDATE_POSITION(1);
+             break;
+           }
+
+          case ']':
+            {
+              EVAL(END_SQUARE_BRACE); UPDATE_POSITION(1);
+              break;
+            }
+
+          case '\"':
+            {
+              db::PositionInfo start = position;
+
+              ++source;
+              char buffer[MAX_STRING_SIZE] = "";
+              int offset = 0;
+              for ( ; *source && *source != '\"'; ++source)
+                {
+                  ++position.position;
+                  if (*source == '\n') UPDATE_LINE();
+                  buffer[offset++] = *source;
+                }
+
+              char *string = db::addString(pool, buffer, error);
+
+              tokens[tokensSize  ]           = STR(string);
+              tokens[tokensSize++]->position = start;
+
+              break;
+            }
+
+        case 'a' ... 'z': case 'A' ... 'Z': case '_': case '$':
+          {
+            bool hasName = true;
+            for (int i = 0; i < STATEMENTS_SIZE; ++i)
+              {
+                if (!strncmp(source, STATEMENTS[i].name, (size_t)STATEMENTS[i].size))
+                  {
+                    switch (source[STATEMENTS[i].size])
+                      {
+                      case 'a' ... 'z': case 'A' ... 'Z': case '_': case '$':
+                        continue;
+                      default: break;
+                      }
+                    tokens[tokensSize  ]           = ST(STATEMENTS[i].value);
+                    tokens[tokensSize++]->position = position;
+                    source += STATEMENTS[i].size - 1;
+
+                    UPDATE_POSITION(STATEMENTS[i].size);
+                    hasName = false;
+                    break;
+                  }
+              }
+
+            if (hasName)
+              {
+                char buffer[MAX_NAME_SIZE] = "";
+                int offset = 0;
+                sscanf(source, "%[_$a-zA-Z]%n", buffer, &offset);
+
+                char *string = db::addString(pool, buffer, error);
+
+                tokens[tokensSize  ]           = NAM(string);
+                tokens[tokensSize++]->position = position;
+
+                source += offset - 1;
+                UPDATE_POSITION(offset);
+              }
+
+            break;
+          }
+
+        case '0' ... '9':
+          {
+            double num = 0;
+            int offset = 0;
+            sscanf(source, "%lg%n", &num, &offset);
+            tokens[tokensSize  ]           = NUM(num);
+            tokens[tokensSize++]->position = position;
+
+            source += offset - 1;
+
+            UPDATE_POSITION(offset);
+            break;
+          }
+        default: break;
         }
-
-      skipSpaces(&source, &position, &errorCode);
-
-      ++tokensSize;
     }
 
   if (tokensSize == tokensCapacity)
@@ -194,188 +383,4 @@ db::Token *db::getTokens(const char *source, int *error)
   tokens[tokensSize++]->position = position;
 
   return resizeTokens(tokens, tokensSize, error);
-}
-
-static void skipSpaces(
-                       const char **source,
-                       db::PositionInfo *position,
-                       int *error
-                      )
-{
-  if (!source || !*source || !position) ERROR();
-
-  while (isspace(**source) && **source)
-    {
-      if (**source == '\n')
-        {
-          ++position->line;
-          position->position = 1;
-        }
-      else ++position->position;
-
-      ++*source;
-    }
-
-  skipComments(source, position, error);
-}
-
-static void skipComments(
-                         const char **source,
-                         db::PositionInfo *position,
-                         int *error
-                        )
-{
-  if (!source || !*source || !position) ERROR();
-
-  if (**source != '/' || *(*source + 1) != '/')
-    return;
-
-  while (**source != '\n' && **source)
-    ++*source;
-
-  if (**source == '\n')
-    ++*source;
-
-  ++position->line;
-  position->position = 1;
-
-  skipSpaces(source, position, error);
-}
-
-static bool getStatement(
-                         const char **source,
-                         db::PositionInfo *position,
-                         db::Token *token,
-                         int *error
-                        )
-{
-  if (!source || !*source || !position || !token) ERROR(false);
-
-  skipSpaces(source, position, error);
-
-  char name[MAX_NAME_SIZE] = "";
-  int offset               =  1;
-
-  db::statement_t stNum = db::STATEMENT_ERROR;
-  sscanf(*source, "%[a-zA-Z]", name);
-
-  for (int i = 0; i < STATEMENTS_SIZE; ++i)
-      if (STATEMENTS[i].size == 1)
-        { if (STATEMENTS[i].name[0] == **source) EVAL_STATEMENT(STATEMENTS[i].value , 1); }
-      else
-        { if (!strcmp(STATEMENTS[i].name, name)) EVAL_STATEMENT(STATEMENTS[i].value , STATEMENTS[i].size); }
-
-  if (stNum == db::STATEMENT_ERROR) return false;
-
-   *token            = ST(stNum);
-  (*token)->position = *position;
-
-  position->position += offset;
-  *source            += offset;
-
-  return true;
-}
-
-static bool getName(
-                    const char **source,
-                    db::PositionInfo *position,
-                    db::Token *token,
-                    int *error
-                   )
-{
-  if (!source || !*source || !position || !token) ERROR(false);
-
-  skipSpaces(source, position, error);
-
-  char name[MAX_NAME_SIZE] = "";
-  int offset               = -1;
-
-  if (sscanf(*source, "%[_a-zA-Z]%n", name, &offset) != 1) return false;
-
-  if (isStatement(name)) return false;
-
-   *token            = VAR(name);
-  (*token)->position = *position;
-
-  position->position += offset;
-  *source            += offset;
-
-  return true;
-}
-
-static bool getNumber(
-                      const char **source,
-                      db::PositionInfo *position,
-                      db::Token *token,
-                      int *error
-                     )
-{
-  if (!source || !*source || !position || !token) ERROR(false);
-
-  skipSpaces(source, position, error);
-
-  double value  = NAN;
-  int    offset =  -1;
-
-  if (sscanf(*source, "%lg%n", &value, &offset) != 1) return false;
-  if (!isfinite(value)) return false;
-
-   *token            = NUM(value);
-  (*token)->position = *position;
-
-  position->position += offset;
-  *source            += offset;
-
-  return true;
-}
-
-static bool getString  (
-                        const char **source,
-                        db::PositionInfo *position,
-                        db::Token *token,
-                        int *error
-                       )
-{
-  if (!source || !*source || !position || !token) ERROR(false);
-
-  skipSpaces(source, position, error);
-
-  char string[MAX_NAME_SIZE] = "";
-  int offset                 = -1;
-
-  if (sscanf(*source, " \"%[^\"]\"%n", string, &offset) != 1) return false;
-
-  *token             = VAR(string);
-  (*token)->type = db::type_t::STRING;
-  (*token)->position = *position;
-
-  position->position += offset;
-  *source            += offset;
-
-  return true;
-}
-
-static bool getError(
-                     const char **source,
-                     db::PositionInfo *position,
-                     db::Token *token,
-                     int *error
-                    )
-{
-  if (!source || !*source || !position || !token) ERROR(false);
-
-   *token            = ST(db::STATEMENT_ERROR);
-  (*token)->position = *position;
-
-  return true;
-}
-
-static bool isStatement(const char *name, int *error)
-{
-  if (!name) ERROR(false);
-
-  for (int i = 0; i < STATEMENTS_SIZE; ++i)
-    if (!strcmp(name, STATEMENTS[i].name)) return true;
-
-  return false;
 }

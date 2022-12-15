@@ -8,7 +8,13 @@
 
 #define MAX_MESSAGE_SIZE 1024
 
-const char *const ELEMENT_COLOR = "\"#b59d65\"";
+const char *const STATEMENT_COLOR = "\"#bf8511\"";
+const char *const NAME_COLOR      = "\"#ddc173\"";
+const char *const NUMBER_COLOR    = "\"#315bbc\"";
+const char *const STRING_COLOR    = "\"#41bc66\"";
+const char *const ERROR_COLOR     = "\"#cc0033\"";
+
+static const char *getColor(db::type_t type);
 
 static char *toString(db::treeValue_t value, db::type_t type);
 
@@ -114,40 +120,23 @@ static void openDigraph(FILE *file)
 
 static void setDefaultNodeParameters(FILE *file)
 {
-  fprintf(file, "\tnode[shape=Mrecord];\n");
+  fprintf(file, "\tnode[shape=Mrecord];\n"
+          "LEFT[color=RED];\n"
+          "RIGHT[color=BLUE];\n");
 }
 
 static void generateNode(const db::TreeNode *node, int isDump, FILE *file)
 {
   assert(node);
-  if (isDump)
-      fprintf(
-              file,
-              "\t\tNODE_%p [ style=filled,color=%s,label=\""
-              "{ %p |"
-              " %s |"
-              " <p> Parent: %p |"
-              " <l> Left  : %p |"
-              " <r> Right : %p }"
-              "\" ];\n",
-              (const void *)node,
-              ELEMENT_COLOR,
-              (const void *)node,
-              toString(node->value, node->type),
-              (const void *)node->parent,
-              (const void *)node->left,
-              (const void *)node->right
-              );
-  else
-    fprintf(
-            file,
-            "\t\tNODE_%p [ style=filled,color=%s,label=\""
-            "{ %s }"
-            "\" ];\n",
-            (const void *)node,
-            ELEMENT_COLOR,
-            toString(node->value, node->type)
-            );
+
+  fprintf(
+          file,
+          "\t\tNODE_%p [ style=filled,color=%s,label=\""
+          " %s \" ];\n",
+          (const void *)node,
+          getColor(node->type),
+          toString(node->value, node->type)
+          );
 
   if (node->left)
     generateNode(node->left, isDump, file);
@@ -162,14 +151,14 @@ static void generateMainSequence(const db::TreeNode *node, FILE *file)
 
   if (node->left)
     {
-      fprintf(file, "\tNODE_%p->NODE_%p;\n", (const void *)node, (const void *)node->left);
+      fprintf(file, "\tNODE_%p->NODE_%p[color=RED];\n", (const void *)node, (const void *)node->left);
 
       generateMainSequence(node->left, file);
     }
 
   if (node->right)
     {
-      fprintf(file, "\tNODE_%p->NODE_%p;\n", (const void *)node, (const void *)node->right);
+      fprintf(file, "\tNODE_%p->NODE_%p[color=BLUE];\n", (const void *)node, (const void *)node->right);
       generateMainSequence(node->right, file);
     }
 }
@@ -187,16 +176,28 @@ static char *toString(db::treeValue_t value, db::type_t type)
   switch (type)
     {
     case db::type_t::STATEMENT:
-      sprintf(buffer, " Statement: %s ", db::STATEMENT_NAMES[value.statement]); break;
+      sprintf(buffer, " %s ", db::STATEMENT_NAMES[value.statement]); break;
     case db::type_t::NAME:
-      sprintf(buffer, " Name: %s ", value.name);                                break;
+      sprintf(buffer, " %s ", value.name);                                break;
     case db::type_t::NUMBER:
-      sprintf(buffer, " Number: %lg " , value.number);                          break;
+      sprintf(buffer, " %lg " , value.number);                          break;
     case db::type_t::STRING:
-      sprintf(buffer, " String: '%s' ", value.string);                          break;
+      sprintf(buffer, " '%s' ", value.string);                          break;
     default:
       sprintf(buffer, " UNKNOWN TYPE ");                                        break;
     }
 
   return buffer;
+}
+
+static const char *getColor(db::type_t type)
+{
+  switch (type)
+    {
+    case db::type_t::STATEMENT: return STATEMENT_COLOR;
+    case db::type_t::NAME:      return NAME_COLOR;
+    case db::type_t::NUMBER:    return NUMBER_COLOR;
+    case db::type_t::STRING:    return STRING_COLOR;
+    default:                    return ERROR_COLOR;
+    }
 }

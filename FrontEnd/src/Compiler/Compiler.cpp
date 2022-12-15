@@ -32,22 +32,12 @@ void start()
                    );
   if (error) { db::removeTranslator(&translator); return; }
 
-  FILE *target = fopen(settings.target, "w");
-  if (!target) { db::removeTranslator(&translator); return; }
-
   db:: dumpTree(&translator.grammar, 0, getLogFile());
 
-  FILE *middleEndFile = fopen("resources/grammar.txt", "w");
-  if (!middleEndFile) { fclose(target); db::removeTranslator(&translator); return; }
-  db::saveTranslator(&translator, middleEndFile);
+  FILE *target = fopen(settings.target, "w");
+  if (!target) { db::removeTranslator(&translator); return; }
+  db::saveTranslator(&translator, target);
 
-  db::translate(&translator, target, &error);
-  if (error)
-    {
-      fclose(target);
-      db::removeTranslator(&translator);
-      return;
-    }
-
+  fclose(target);
   db::removeTranslator(&translator);
 }
