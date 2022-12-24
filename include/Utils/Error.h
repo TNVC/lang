@@ -5,7 +5,7 @@
     {                                           \
       if (error)                                \
         *error = -1;                            \
-      printf("%d\n", __LINE__);                            \
+      printf("%d %s\n", __LINE__, __FILE__);             \
                                                 \
       return __VA_ARGS__;                       \
     } while (0)

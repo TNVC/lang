@@ -1,5 +1,5 @@
 CC   := g++
-NAME := ngcc
+NAME := nkt
 ARGS :=
 
 LOGFILE := compileLog

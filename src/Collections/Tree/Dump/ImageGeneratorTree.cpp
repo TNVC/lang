@@ -8,9 +8,9 @@
 
 #define MAX_MESSAGE_SIZE 1024
 
-const char *const STATEMENT_COLOR = "\"#bf8511\"";
+const char *const STATEMENT_COLOR = "\"#ffd0ff\"";
 const char *const NAME_COLOR      = "\"#ddc173\"";
-const char *const NUMBER_COLOR    = "\"#315bbc\"";
+const char *const NUMBER_COLOR    = "\"#b0d0ff\"";
 const char *const STRING_COLOR    = "\"#41bc66\"";
 const char *const ERROR_COLOR     = "\"#cc0033\"";
 

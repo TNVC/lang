@@ -316,11 +316,16 @@ static void upStatic(db::Translator *translator, int *error)
   temp = translator->grammar.root;
   for ( ; temp->right; temp = temp->right) continue;
 
-  db::Token newFirst = lastStatic->right;
-  lastStatic->right = main;
+  if (lastStatic)
+    {
+      db::Token newFirst = lastStatic->right;
+      lastStatic->right = main;
 
-  temp->right = translator->grammar.root;
-  translator->grammar.root = newFirst;
+      temp->right = translator->grammar.root;
+      translator->grammar.root = newFirst;
+    }
+  else
+    temp->right = main;
 }
 
 static db::Token callFunction(const db::Token parameters, db::Token arguments, bool *fail)

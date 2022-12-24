@@ -1,5 +1,5 @@
 CC   := g++
-NAME := asm
+NAME := dasm
 ARGS :=
 
 LOGFILE := compileLog
@@ -8,7 +8,7 @@ CFLAGS := `/usr/lib/x86_64-linux-gnu/ImageMagick-6.9.11/bin-q16/Magick++-config 
 SANITIZERS := -fsanitize=address,leak #,alignment,bool,bounds,enum,float-cast-overflow,float-divide-by-zero,integer-divide-by-zero,leak,nonnull-attribute,null,object-size,return,returns-nonnull-attribute,shift,signed-integer-overflow,undefined,unreachable,vla-bound,vptr
 LFLAGS := -lpthread -lasan -lmatplot `/usr/lib/x86_64-linux-gnu/ImageMagick-6.9.11/bin-q16/Magick++-config --ldflags --libs`
 #	-L/usr/lib/ -lFestival -L/usr/lib/speech_tools/lib -lestools -lestbase -leststring
-SRCDIR := ../src src
+SRCDIR := src ../src
 SRCDIR := $(shell find $(SRCDIR) -type d)
 
 OBJDIR := objects
@@ -65,13 +65,3 @@ $(if $(OBJDIR), $(OBJDIR)/%.o, %.o): %.cpp
 	@$(CC) -c $(addprefix -I, $(INCDIR)) -save-temps $(CFLAGS) $(SANITIZERS) $< -o $@ #2>>$(LOGFILE)
 
 include $(wildcard $(DEPDIR)/*.d)
-
-
-execute: clean run
-	@assembler ../resources/code.asm -out ../resources/a.bin -temp ../resources/code.listing
-	@softcpu ../resources/a.bin
-
-exe: run
-	@assembler ../resources/code.asm -out ../resources/a.bin -temp ../resources/code.listing
-	@softcpu ../resources/a.bin
-

@@ -78,17 +78,21 @@
 #define IS_END_SQUARE_BRACE(NODE) IS_IT_STATEMENT(NODE, END_SQUARE_BRACE)
 #define IS_INT(NODE)         IS_IT_STATEMENT(NODE, INT        )
 #define IS_PARAM(NODE)       IS_IT_STATEMENT(NODE, PARAMETER  )
+#define IS_TAN(NODE)         IS_IT_STATEMENT(NODE, TAN        )
+#define IS_DIFF(NODE)        IS_IT_STATEMENT(NODE, DIFF       )
 
 #define IS_NUM(NODE)       (NODE->type == db::type_t::NUMBER   )
 #define IS_STATEMENT(NODE) (NODE->type == db::type_t::STATEMENT)
 #define IS_NAME(NODE)      (NODE->type == db::type_t::NAME     )
 #define IS_STRING(NODE)    (NODE->type == db::type_t::STRING   )
 
-#define IS_FUNCTION(NODE)                        \
-  (IS_ADD(NODE) ||                               \
-   IS_SUB(NODE) ||                               \
-   IS_SIN(NODE) ||                               \
-   IS_COS(NODE) ||                               \
+#define IS_FUNCTION(NODE)                       \
+  (IS_ADD(NODE)  ||                             \
+   IS_SUB(NODE)  ||                             \
+   IS_SIN(NODE)  ||                             \
+   IS_COS(NODE)  ||                             \
+   IS_TAN(NODE)  ||                             \
+   IS_DIFF(NODE) ||                             \
    IS_SQRT(NODE))
 
 #define IS_IT_STATEMENT(NODE, STATEMENT_NAME)                                \

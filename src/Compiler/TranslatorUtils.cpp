@@ -66,7 +66,7 @@ void db::getTranslator(
   if (hasError || !translator->tokens) { free(buffer); ERROR(); }
 
   free(buffer);
-               /*
+                 /*
   db::Token *tokens = translator->tokens;
   int i =10;
   for ( ; !IS_END(tokens[i]); ++i)
@@ -101,7 +101,7 @@ void db::getTranslator(
         }
     }
   printf("OP : '%s' at L:%d P:%d\n", STATEMENT_NAMES[STATEMENT(tokens[i])], tokens[i]->position.line, tokens[i]->position.position);
-    */
+      */
    db::getGrammarly(translator, error);
 
    free(translator->tokens);

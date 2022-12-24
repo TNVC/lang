@@ -64,6 +64,7 @@ static void saveToken(const db::Token token, FILE *target, int *error)
             CASE(DIV, DIV);
             CASE(SIN , SIN );
             CASE(COS , COS );
+            CASE(TAN , TAN );
             CASE(SQRT, SQRT);
             CASE(ASSIGNMENT, EQ);
             CASE(IF  , IF  );
@@ -91,6 +92,7 @@ static void saveToken(const db::Token token, FILE *target, int *error)
             CASE(AND, AND);
             CASE(NEW_LINE, ENDL);
             CASE(INT, MOD);
+            CASE(DIFF, DIFF);
           default: break;
           }
         break;
@@ -109,7 +111,8 @@ static void saveToken(const db::Token token, FILE *target, int *error)
       fprintf(target, "\n");
       saveToken(token->left , target, error);
     }
-  else if (IS_STATEMENT(token) || (IS_NAME(token) && token->right))
+  else if (IS_STATEMENT(token) || (IS_NAME(token) &&
+                                   (token->left || token->right )))
     {
       fprintf(target, "\n");
       printSpaces(tabs, target);
@@ -118,7 +121,8 @@ static void saveToken(const db::Token token, FILE *target, int *error)
 
   if (token->right)
     saveToken(token->right, target, error);
-  else if (IS_STATEMENT(token) || (IS_NAME(token) && token->right))
+  else if (IS_STATEMENT(token) || (IS_NAME(token) &&
+                                   (token->left || token->right)))
     {
       printSpaces(tabs, target);
       fprintf(target, "  { NIL } \n");
@@ -136,13 +140,8 @@ static const char *getNodePrefix(db::Token token, int *error)
 
   if (IS_STRING(token) || IS_ENDL(token))
     return " $db::str ";
-  if (IS_SQRT(token) || IS_INT(token))
+  if (IS_SQRT(token) || IS_INT(token) || IS_DIFF(token))
     return " $db::math ";
-
-  if (IS_EQUAL(token)   || IS_NOT_EQUAL(token) ||
-      IS_LESS(token)    || IS_GREATER(token)   ||
-      IS_LESS_EQ(token) || IS_GREATER_EQ(token))
-    return " $db::relation ";
 
   if (IS_OR(token) || IS_AND(token))
     return " $db::logic ";

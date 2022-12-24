@@ -249,7 +249,7 @@ static bool translateCall(
                           int *error
                          )
 {
-  CHECK_ARGUMENTS();///////////
+  CHECK_ARGUMENTS();
 
   if (!IS_NAME(token->left)) HANDLE_ERROR("Call hasn`t function name");
 
@@ -257,77 +257,32 @@ static bool translateCall(
 
   fprintf(target, ";Save stack pointer\n"
           "PUSH %s\n",
-          //          "POP [%d+%s]\n"
-          //          STACK_POINTER_ADDRESS,
           STACK_BOTTOM_ADDRESS);
-  //          STACK_MEMORY_START+1,
-  //          STACK_POINTER_ADDRESS);
 
-  /*
-  fprintf(target,
-          ";Turn off real-calc\n"
-          "PUSH 0\n"
-          "POP rex\n");
-
-  fprintf(target,
-          ";Update stack pointer\n"
-          "PUSH 1\n"
-          "PUSH %s\n"
-          "ADD\n"
-          "POP %s\n",
-          STACK_POINTER_ADDRESS,
-          STACK_POINTER_ADDRESS);
-
-  fprintf(target,
-          ";Turn on real-calc\n"
-          "PUSH 1\n"
-          "POP rex\n");
-  */
   if (token->left->left)
     if (!translateArgument(token->left->left, translator, target))
       ERROR(false);
 
   fprintf(target, "CALL FUN_%s\n", NAME(token->left));
-  /*
-  fprintf(target,
-          ";Turn off real-calc\n"
-          "PUSH 0\n"
-          "POP rex\n");
 
-  fprintf(target,
-          ";Update stack pointer\n"
-          "PUSH 1\n"
-          "PUSH %s\n"
-          "SUB\n"
-          "POP %s\n",
-          STACK_POINTER_ADDRESS,
-          STACK_POINTER_ADDRESS);
-
-  fprintf(target,
-          ";Turn on real-calc\n"
-          "PUSH 1\n"
-          "POP rex\n");
-  */
   fprintf(target, ";Pop stack pointer\n");
   fprintf(target,
-          //      "PUSH [%d+%s]\n"
           "POP %s\n",
-          //          "PUSH [%d+%s]\n"
-          //          "POP %s\n",
-          //STACK_MEMORY_START,
-          //STACK_POINTER_ADDRESS,
-          //STACK_FUNCTION_ADDRESS,
-          //STACK_MEMORY_START+1,
           STACK_BOTTOM_ADDRESS);
-          //STACK_POINTER_ADDRESS);
 
-  fprintf(target, "PUSH %s\n", RETURN_FRACT_ADDRESS);
-  fprintf(target, "PUSH %s\n",   RETURN_INT_ADDRESS);
+  db::Token function =
+    db::searchFunction(NAME(token->left), translator);
+
+  if (IS_TYPE(function->left->right))
+    {
+      fprintf(target, "PUSH %s\n", RETURN_FRACT_ADDRESS);
+      fprintf(target, "PUSH %s\n",   RETURN_INT_ADDRESS);
+    }
 
   END_TRANSLATE();
 
   return true;
-}
+}//Fact(105 - 5) -> Tree  -> Lang -> Fact(6) -> Tree -> Lang
 
 static bool translateReturn(
                             db::Translator *translator,
@@ -646,7 +601,7 @@ static bool translateAssignment(
   if (!var) HANDLE_ERROR("Unknown variable: %s", NAME(token->left));
 
   translateToken(token->right, translator,target, error);
-  fprintf(target, "COPY\n");
+  //fprintf(target, "COPY\n");
 
   if (var->isGlobal)
     {
@@ -740,6 +695,7 @@ static bool translateToken(
           case db::STATEMENT_SIN:       TRANSLATE_UNARY(SIN     ); break;
           case db::STATEMENT_COS:       TRANSLATE_UNARY(COS     ); break;
           case db::STATEMENT_POW:       TRANSLATE_BINARY(POW    ); break;
+          case db::STATEMENT_TAN:       TRANSLATE_UNARY(TAN     ); break;
           case db::STATEMENT_SQRT:      TRANSLATE_UNARY(SQRT    ); break;
           case db::STATEMENT_AND:       TRANSLATE_BINARY(AND    ); break;
           case db::STATEMENT_OR:        TRANSLATE_BINARY(OR     ); break;
@@ -989,13 +945,6 @@ static int allocateInstruction(db::Token token, db::Translator *translator, int 
         break;
       case db::STATEMENT_VAL: case db::STATEMENT_VAR:
         {
-          /*                   db::addVariable(
-                          NAME(token->left),
-                          IS_VAL(token),
-                          translator,
-                          variableCount+startIndex/2
-                          );//*///////////////////////////////////////////////////////
-
           fprintf(target,
                   ";Allocate local var/val\n"
                   ";%d_%s [%d+%s]\n"

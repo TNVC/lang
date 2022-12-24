@@ -12,14 +12,15 @@
 
 #pragma GCC diagnostic ignored "-Wswitch-enum"
 
-#define CHECK_CHAR(CHAR)                              \
-  do                                                  \
-    {                                                 \
-      if (!fscanf(source, " %c", &ch) || ch != CHAR)  \
-        {                                             \
-          handleError("Expected " #CHAR " ");         \
-          ERROR(nullptr);                             \
-        }                                             \
+#define CHECK_CHAR(CHAR)                                       \
+  do                                                           \
+    {                                                          \
+      if (!fscanf(source, " %c", &ch) || ch != CHAR)           \
+        {                                                      \
+          printf("%s\n", buffer);                              \
+          handleError("Expected " #CHAR " %d", __LINE__);      \
+          ERROR(nullptr);                                      \
+        }                                                      \
     } while (0)
 
 #define HANDLE_ERROR(MESSAGE, ...)                    \
@@ -77,6 +78,7 @@ const Statement STATEMENTS[] =
     {"POW"  , db::STATEMENT_POW       , 3},
     {"COS"  , db::STATEMENT_COS       , 3},
     {"SIN"  , db::STATEMENT_SIN       , 3},
+    {"TAN"  , db::STATEMENT_TAN       , 3},
     {"OUT"  , db::STATEMENT_OUT       , 3},
     {"IN"   , db::STATEMENT_IN        , 2},
 
@@ -91,9 +93,10 @@ const Statement STATEMENTS[] =
     {"MOD"   , db::STATEMENT_INT       , 3},
     {"AND"   , db::STATEMENT_AND       , 3},
     {"OR"    , db::STATEMENT_OR        , 2},
+    {"DIFF"  , db::STATEMENT_DIFF      , 4},
   };
 
-const int STATEMENTS_SIZE = 32;
+const int STATEMENTS_SIZE = 33;
 
 static db::Token createNumber(db::number_t value)
 {
@@ -133,13 +136,14 @@ void db::loadTranslator(
 
   bool hasntTokens = false;
   int codeError = 0;
+
   translator->grammar.root
     = loadToken(source, &translator->stringPool, &hasntTokens, &codeError);
   if (codeError) ERROR();
 
   db:: dumpTree(&translator->grammar, 0, getLogFile());
-  if (!translator->grammar.root) ERROR();
-  if (!IS_COMP(translator->grammar.root)) ERROR();
+  if (!translator->grammar.root)          HANDLE_ERROR("File hasn`t tree");
+  if (!IS_COMP(translator->grammar.root)) HANDLE_ERROR("Root of tree isn`t statement");
 
   db::addVarTable(translator, &codeError);
   if (codeError) ERROR();
@@ -301,10 +305,10 @@ static void findFunctions(db::Translator *translator, db::Token token, int *erro
 
   if (IS_FUN(token))
     {
-          if (!IS_NAME(token->left))
-          HANDLE_ERROR("Invalid .std file: No function name");
-        if (!IS_TYPE(token->left->right) &&
-            !IS_VOID(token->left->right))
+      if (!IS_NAME(token->left))
+        HANDLE_ERROR("Invalid .std file: No function name");
+      if (!IS_TYPE(token->left->right) &&
+          !IS_VOID(token->left->right))
           HANDLE_ERROR("Invalid .std file: No return type");
 
         db::Token param = token->left->left;
@@ -323,7 +327,7 @@ static void findFunctions(db::Translator *translator, db::Token token, int *erro
 
         if (!IS_COMP(token->right))
           HANDLE_ERROR("Invalid .std file: "
-                       "Invalid body of function");
+                       "Invalid body of function: %s", NAME(token->left));
 
         //checkFunction(translator, token->right, &errorCode);
         //if (errorCode) ERROR();

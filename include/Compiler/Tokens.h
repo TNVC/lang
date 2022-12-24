@@ -68,6 +68,10 @@ namespace db {
     STATEMENT_INT,
 
     STATEMENT_POW,
+
+    STATEMENT_TAN,
+
+    STATEMENT_DIFF,
   };
 
   const char *const STATEMENT_NAMES[] =
@@ -133,7 +137,11 @@ namespace db {
       "]",
       "int",
 
-      "^"
+      "^",
+
+      "tan",
+
+      "dif",
   };
 
   struct PositionInfo {

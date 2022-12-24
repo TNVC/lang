@@ -18,6 +18,12 @@
       tokens[tokensSize++]->position = position;                        \
     } while (0)
 
+#define CASE(CHAR, CODE, OFFSET)                           \
+  case CHAR: EVAL(CODE); UPDATE_POSITION(OFFSET); break;
+
+#define DEFAULT(CODE, OFFSET)                                        \
+  default: --source; EVAL(CODE); UPDATE_POSITION(OFFSET); break;
+
 #define UPDATE_LINE()                           \
   do                                            \
     {                                           \
@@ -69,6 +75,7 @@ const Statement STATEMENTS[] =
     {"sqrt"  , db::STATEMENT_SQRT       , 4},
     {"sin"   , db::STATEMENT_SIN        , 3},
     {"cos"   , db::STATEMENT_COS        , 3},
+    {"tan"   , db::STATEMENT_TAN        , 3},
     {"fun"   , db::STATEMENT_FUN        , 3},
     {"Void"  , db::STATEMENT_VOID       , 4},
     {"Double", db::STATEMENT_TYPE       , 6},
@@ -77,9 +84,10 @@ const Statement STATEMENTS[] =
     {"else"  , db::STATEMENT_ELSE       , 4},
     {"while" , db::STATEMENT_WHILE      , 5},
     {"static", db::STATEMENT_STATIC     , 6},
+    {"diff"  , db::STATEMENT_DIFF       , 4},
   };
 
-const int STATEMENTS_SIZE = 33;
+const int STATEMENTS_SIZE = 35;
 
 static db::Token *resizeTokens(db::Token *tokens, size_t newSize, int *error = nullptr);
 

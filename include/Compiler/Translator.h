@@ -39,6 +39,10 @@ namespace db {
     Translator &operator=(const Translator &original) = delete;
   };
 
+  void disassemblerGrammar(const Translator *translator, FILE *target, int *error = nullptr);
+
+  void simplyGrammar(Translator *translator, int *error = nullptr);
+
   void saveGrammary(const Translator *translator, FILE *target, int *error = nullptr);
 
   void initTranslator(Translator *translator, int *error = nullptr);
